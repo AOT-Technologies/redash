@@ -1,4 +1,5 @@
-FROM node:18-bookworm as frontend-builder
+# Use multi-architecture base images
+FROM --platform=$BUILDPLATFORM node:18-bookworm as frontend-builder
 
 RUN npm install --global --force yarn@1.22.19
 
@@ -27,7 +28,8 @@ COPY --chown=redash webpack.config.js /frontend/
 # Use `yarn run` to ensure the locally installed webpack is used
 RUN yarn clean && yarn build:viz && NODE_OPTIONS=--openssl-legacy-provider NODE_ENV=production yarn run webpack && mkdir -p /frontend/client/dist && touch /frontend/client/dist/multi_org.html && touch /frontend/client/dist/index.html
 
-FROM python:3.8-slim-bookworm
+# Use multi-architecture base images
+FROM --platform=$BUILDPLATFORM python:3.8-slim-bookworm
 
 EXPOSE 5000
 
