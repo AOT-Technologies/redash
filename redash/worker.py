@@ -3,10 +3,10 @@ from functools import partial
 
 from rq import get_current_job
 from rq.decorators import job as rq_job
-
+from redash.utils.job_filter import CurrentJobFilter
 from redash import rq_redis_connection, settings
+#from redash.authentication.org_resolving import _get_current_org
 from redash.tasks.worker import Queue as RedashQueue
-
 default_operational_queues = ["periodic", "emails", "default"]
 default_query_queues = ["scheduled_queries", "queries", "schemas"]
 default_queues = default_operational_queues + default_query_queues
@@ -24,15 +24,6 @@ job = partial(
     StatsdRecordingJobDecorator, connection=rq_redis_connection, failure_ttl=settings.JOB_DEFAULT_FAILURE_TTL
 )
 
-
-class CurrentJobFilter(logging.Filter):
-    def filter(self, record):
-        current_job = get_current_job()
-
-        record.job_id = current_job.id if current_job else ""
-        record.job_func_name = current_job.func_name if current_job else ""
-
-        return True
 
 
 def get_job_logger(name):
