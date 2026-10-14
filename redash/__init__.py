@@ -13,7 +13,7 @@ from redash import settings
 from redash.app import create_app  # noqa
 from redash.destinations import import_destinations
 from redash.query_runner import import_query_runners
-
+from redash.utils.format import CustomFormatter
 __version__ = "24.04.0-dev"
 
 
@@ -25,8 +25,7 @@ if os.environ.get("REMOTE_DEBUG"):
 
 def setup_logging():
     handler = logging.StreamHandler(sys.stdout if settings.LOG_STDOUT else sys.stderr)
-    formatter = logging.Formatter(settings.LOG_FORMAT)
-    handler.setFormatter(formatter)
+    handler.setFormatter(CustomFormatter())
     logging.getLogger().addHandler(handler)
     logging.getLogger().setLevel(settings.LOG_LEVEL)
 

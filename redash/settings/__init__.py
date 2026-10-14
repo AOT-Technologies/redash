@@ -223,9 +223,7 @@ LOG_FORMAT = os.environ.get(
 RQ_WORKER_JOB_LOG_FORMAT = os.environ.get(
     "REDASH_RQ_WORKER_JOB_LOG_FORMAT",
     (
-        LOG_PREFIX + "[%(asctime)s][PID:%(process)d][%(levelname)s][%(name)s] "
-        "job.func_name=%(job_func_name)s "
-        "job.id=%(job_id)s %(message)s"
+        LOG_PREFIX + "%(org_id)s - %(asctime)s - %(name)s - %(levelname)s - %(message)s (%(filename)s:%(lineno)d) - PID:%(process)d - job.func_name=%(job_func_name)s - job.id=%(job_id)s "
     ),
 )
 
