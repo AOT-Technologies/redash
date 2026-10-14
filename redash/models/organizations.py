@@ -1,12 +1,17 @@
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy_utils.models import generic_repr
 
 from redash.settings.organization import settings as org_settings
 
-from .base import db, Column, primary_key
+from .base import Column, db, primary_key
 from .mixins import TimestampMixin
-from .types import MutableDict, PseudoJSON
-from .users import User, Group
+from .types import MutableDict
+from .users import Group, User
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @generic_repr("id", "name", "slug")
@@ -17,7 +22,7 @@ class Organization(TimestampMixin, db.Model):
     id = primary_key("Organization")
     name = Column(db.String(255))
     slug = Column(db.String(255), unique=True)
-    settings = Column(MutableDict.as_mutable(PseudoJSON))
+    settings = Column(MutableDict.as_mutable(JSONB), default={})
     groups = db.relationship("Group", lazy="dynamic")
     events = db.relationship("Event", lazy="dynamic", order_by="desc(Event.created_at)")
 
@@ -36,16 +41,11 @@ class Organization(TimestampMixin, db.Model):
 
     @property
     def default_group(self):
-        default_group = self.groups.filter(
-            Group.name == "default", Group.type == Group.BUILTIN_GROUP
-        ).first()
-        print("Default group found %s", default_group)
-        if default_group is None:
-            print("Default group is None")
-            default_group = self.groups.filter(
-                Group.name == f'{self.slug}-admin', Group.type == Group.REGULAR_GROUP
-            ).one_or_none()
-            print("Default group with admin name found %s", default_group)
+        logger.debug("INSIDE Default Group ")
+        logger.debug(f"self.groups : {self.groups}")
+        default_group = self.groups.filter(Group.name == "default", Group.type == Group.BUILTIN_GROUP).first()
+        if not default_group:
+            default_group = self.groups.first()
         return default_group
 
     @property
@@ -88,9 +88,7 @@ class Organization(TimestampMixin, db.Model):
 
     @property
     def admin_group(self):
-        return self.groups.filter(
-            Group.name == "admin", Group.type == Group.BUILTIN_GROUP
-        ).first()
+        return self.groups.filter(Group.name == "admin", Group.type == Group.BUILTIN_GROUP).first()
 
     def has_user(self, email):
         return self.users.filter(User.email == email).count() == 1

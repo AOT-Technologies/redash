@@ -4,17 +4,13 @@ on:
   push:
     branches:
       - formsflow
+      - formsflow-merge
   workflow_dispatch:
 
 defaults:
   run:
     shell: bash
     working-directory: .
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
-  TAG: sha-${{ github.sha }}
 
 jobs:
   build-and-push-image-to-dockerhub:

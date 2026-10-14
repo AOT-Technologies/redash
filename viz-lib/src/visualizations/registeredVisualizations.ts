@@ -14,8 +14,6 @@ import sankeyVisualization from "./sankey";
 import sunburstVisualization from "./sunburst";
 import tableVisualization from "./table";
 import wordCloudVisualization from "./word-cloud";
-import ganttChartVisualization from "./gantt-chart";
-import eventCalendarVisualization from "./event-calendar";
 
 type VisualizationConfig = {
   type: string;
@@ -92,9 +90,7 @@ each(
     sankeyVisualization,
     sunburstVisualization,
     tableVisualization,
-    wordCloudVisualization,
-    ganttChartVisualization,
-    eventCalendarVisualization
+    wordCloudVisualization
   ]),
   registerVisualization
 );

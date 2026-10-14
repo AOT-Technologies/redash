@@ -7,7 +7,11 @@ from funcy import project
 from sqlalchemy.exc import IntegrityError
 
 from redash import models
-from redash.handlers.base import BaseResource, get_object_or_404, require_fields
+from redash.handlers.base import (
+    BaseResource,
+    get_object_or_404,
+    require_fields,
+)
 from redash.permissions import (
     require_access,
     require_admin,
@@ -17,10 +21,12 @@ from redash.permissions import (
 from redash.query_runner import (
     get_configuration_schema_for_query_runner_type,
     query_runners,
-    NotSupported,
 )
+from redash.serializers import serialize_job
+from redash.tasks.general import get_schema, test_connection
 from redash.utils import filter_none
 from redash.utils.configuration import ConfigurationContainer, ValidationError
+
 from redash.tasks.general import test_connection, get_schema
 from redash.serializers import serialize_job
 from redash.worker import get_job_logger
@@ -31,17 +37,12 @@ logger = get_job_logger(__name__)
 class DataSourceTypeListResource(BaseResource):
     @require_admin
     def get(self):
-        return [
-            q.to_dict()
-            for q in sorted(query_runners.values(), key=lambda q: q.name().lower())
-        ]
+        return [q.to_dict() for q in sorted(query_runners.values(), key=lambda q: q.name().lower())]
 
 
 class DataSourceResource(BaseResource):
     def get(self, data_source_id):
-        data_source = get_object_or_404(
-            models.DataSource.get_by_id_and_org, data_source_id, self.current_org
-        )
+        data_source = get_object_or_404(models.DataSource.get_by_id_and_org, data_source_id, self.current_org)
         require_access(data_source, self.current_user, view_only)
 
         ds = {}
@@ -50,19 +51,13 @@ class DataSourceResource(BaseResource):
             ds = data_source.to_dict(all=self.current_user.has_permission("admin"))
 
         # add view_only info, required for frontend permissions
-        ds["view_only"] = all(
-            project(data_source.groups, self.current_user.group_ids).values()
-        )
-        self.record_event(
-            {"action": "view", "object_id": data_source_id, "object_type": "datasource"}
-        )
+        ds["view_only"] = all(project(data_source.groups, self.current_user.group_ids).values())
+        self.record_event({"action": "view", "object_id": data_source_id, "object_type": "datasource"})
         return ds
 
     @require_admin
     def post(self, data_source_id):
-        data_source = models.DataSource.get_by_id_and_org(
-            data_source_id, self.current_org
-        )
+        data_source = models.DataSource.get_by_id_and_org(data_source_id, self.current_org)
         req = request.get_json(True)
 
         schema = get_configuration_schema_for_query_runner_type(req["type"])
@@ -84,24 +79,18 @@ class DataSourceResource(BaseResource):
             if req["name"] in str(e):
                 abort(
                     400,
-                    message="Data source with the name {} already exists.".format(
-                        req["name"]
-                    ),
+                    message="Data source with the name {} already exists.".format(req["name"]),
                 )
 
             abort(400)
 
-        self.record_event(
-            {"action": "edit", "object_id": data_source.id, "object_type": "datasource"}
-        )
+        self.record_event({"action": "edit", "object_id": data_source.id, "object_type": "datasource"})
 
         return data_source.to_dict(all=True)
 
     @require_admin
     def delete(self, data_source_id):
-        data_source = models.DataSource.get_by_id_and_org(
-            data_source_id, self.current_org
-        )
+        data_source = models.DataSource.get_by_id_and_org(data_source_id, self.current_org)
         data_source.delete()
 
         self.record_event(
@@ -121,9 +110,7 @@ class DataSourceListResource(BaseResource):
         if self.current_user.has_permission("admin"):
             data_sources = models.DataSource.all(self.current_org)
         else:
-            data_sources = models.DataSource.all(
-                self.current_org, group_ids=self.current_user.group_ids
-            )
+            data_sources = models.DataSource.all(self.current_org, group_ids=self.current_user.group_ids)
 
         response = {}
         for ds in data_sources:
@@ -132,14 +119,10 @@ class DataSourceListResource(BaseResource):
 
             try:
                 d = ds.to_dict()
-                d["view_only"] = all(
-                    project(ds.groups, self.current_user.group_ids).values()
-                )
+                d["view_only"] = all(project(ds.groups, self.current_user.group_ids).values())
                 response[ds.id] = d
             except AttributeError:
-                logging.exception(
-                    "Error with DataSource#to_dict (data source id: %d)", ds.id
-                )
+                logging.exception("Error with DataSource#to_dict (data source id: %d)", ds.id)
 
         self.record_event(
             {
@@ -167,6 +150,7 @@ class DataSourceListResource(BaseResource):
             abort(400)
 
         try:
+            logger.debug(f"self.current_org {self.current_org}")
             datasource = models.DataSource.create_with_group(
                 org=self.current_org, name=req["name"], type=req["type"], options=config
             )
@@ -177,9 +161,7 @@ class DataSourceListResource(BaseResource):
             if req["name"] in str(e):
                 abort(
                     400,
-                    message="Data source with the name {} already exists.".format(
-                        req["name"]
-                    ),
+                    message="Data source with the name {} already exists.".format(req["name"]),
                 )
 
             abort(400)
@@ -197,9 +179,7 @@ class DataSourceListResource(BaseResource):
 
 class DataSourceSchemaResource(BaseResource):
     def get(self, data_source_id):
-        data_source = get_object_or_404(
-            models.DataSource.get_by_id_and_org, data_source_id, self.current_org
-        )
+        data_source = get_object_or_404(models.DataSource.get_by_id_and_org, data_source_id, self.current_org)
         require_access(data_source, self.current_user, view_only)
         refresh = request.args.get("refresh") is not None
 
@@ -217,9 +197,7 @@ class DataSourceSchemaResource(BaseResource):
 class DataSourcePauseResource(BaseResource):
     @require_admin
     def post(self, data_source_id):
-        data_source = get_object_or_404(
-            models.DataSource.get_by_id_and_org, data_source_id, self.current_org
-        )
+        data_source = get_object_or_404(models.DataSource.get_by_id_and_org, data_source_id, self.current_org)
         data = request.get_json(force=True, silent=True)
         if data:
             reason = data.get("reason")
@@ -239,9 +217,7 @@ class DataSourcePauseResource(BaseResource):
 
     @require_admin
     def delete(self, data_source_id):
-        data_source = get_object_or_404(
-            models.DataSource.get_by_id_and_org, data_source_id, self.current_org
-        )
+        data_source = get_object_or_404(models.DataSource.get_by_id_and_org, data_source_id, self.current_org)
         data_source.resume()
 
         self.record_event(
@@ -257,14 +233,15 @@ class DataSourcePauseResource(BaseResource):
 class DataSourceTestResource(BaseResource):
     @require_admin
     def post(self, data_source_id):
-        data_source = get_object_or_404(
-            models.DataSource.get_by_id_and_org, data_source_id, self.current_org
-        )
-
+        logger.info("TEST Datasource starting")
+        data_source = get_object_or_404(models.DataSource.get_by_id_and_org, data_source_id, self.current_org)
+        logger.info(f"Found data source {data_source}")
         response = {}
 
         job = test_connection.delay(data_source.id)
+        logger.info(f"job {job}")
         while not (job.is_finished or job.is_failed):
+            logger.info(f"job.is_finished {job.is_finished} --> {job.is_failed}")
             time.sleep(1)
             job.refresh()
 
