@@ -64,3 +64,36 @@ class TestHasAccess(BaseTestCase):
         user = models.ApiUser(api_key, None, [])
 
         self.assertTrue(has_access(query, user, view_only))
+
+    def test_allows_dynamic_token_to_run_queries_on_its_dashboard(self):
+        dashboard = self.factory.create_dashboard()
+        widget = self.factory.create_widget(dashboard=dashboard)
+        query = widget.visualization.query_rel
+        user = models.ApiUser("token", self.factory.org, [], obj=dashboard, dynamic=True)
+
+        self.assertTrue(has_access(query, user, view_only))
+        # Unlike stored public links, dynamic tokens may run queries with text parameters.
+        self.assertTrue(has_access(query, user, not view_only))
+
+    def test_doesnt_allow_dynamic_token_to_run_queries_off_its_dashboard(self):
+        dashboard = self.factory.create_dashboard()
+        self.factory.create_widget(dashboard=dashboard)
+        other_query = self.factory.create_widget().visualization.query_rel
+        user = models.ApiUser("token", self.factory.org, [], obj=dashboard, dynamic=True)
+
+        self.assertFalse(has_access(other_query, user, view_only))
+
+    def test_doesnt_allow_dynamic_token_to_run_archived_queries(self):
+        dashboard = self.factory.create_dashboard()
+        query = self.factory.create_widget(dashboard=dashboard).visualization.query_rel
+        query.is_archived = True
+        user = models.ApiUser("token", self.factory.org, [], obj=dashboard, dynamic=True)
+
+        self.assertFalse(has_access(query, user, view_only))
+
+    def test_doesnt_allow_dynamic_token_from_other_org(self):
+        dashboard = self.factory.create_dashboard()
+        query = self.factory.create_widget(dashboard=dashboard).visualization.query_rel
+        user = models.ApiUser("token", self.factory.create_org(), [], obj=dashboard, dynamic=True)
+
+        self.assertFalse(has_access(query, user, view_only))

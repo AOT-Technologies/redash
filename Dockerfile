@@ -28,8 +28,9 @@ COPY --chown=redash webpack.config.js /frontend/
 # Use `yarn run` to ensure the locally installed webpack is used
 RUN yarn clean && yarn build:viz && NODE_OPTIONS=--openssl-legacy-provider NODE_ENV=production yarn run webpack && mkdir -p /frontend/client/dist && touch /frontend/client/dist/multi_org.html && touch /frontend/client/dist/index.html
 
-# Use multi-architecture base images
-FROM --platform=$BUILDPLATFORM python:3.8-slim-bookworm
+# The runtime image is built for each target platform (unlike the frontend builder above,
+# whose output is platform independent), so arm64 images get arm64 Python packages.
+FROM python:3.14-slim-bookworm
 
 EXPOSE 5000
 
@@ -59,6 +60,8 @@ RUN apt-get update && \
   default-libmysqlclient-dev \
   freetds-dev \
   libsasl2-dev \
+  # libev event loop for the Cassandra driver
+  libev-dev \
   unzip \
   libsasl2-modules-gssapi-mit && \
   apt-get clean && \
@@ -66,7 +69,7 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-ENV POETRY_VERSION=1.6.1
+ENV POETRY_VERSION=1.8.5
 ENV POETRY_HOME=/etc/poetry
 ENV POETRY_VIRTUALENVS_CREATE=false
 RUN curl -sSL https://install.python-poetry.org | python3 -

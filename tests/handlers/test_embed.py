@@ -1,4 +1,8 @@
+from mock import patch
+
+from redash import settings
 from redash.models import db
+from redash.utils.dynamic_key import generate_token
 from tests import BaseTestCase
 
 
@@ -65,6 +69,21 @@ class TestPublicDashboard(BaseTestCase):
         )
         self.assertEqual(res.status_code, 302)
 
+    def test_dynamic_token(self):
+        dashboard = self.factory.create_dashboard()
+        token = generate_token(dashboard.id, self.factory.user.id)
+
+        res = self.make_request("get", "/public/dashboards/{}".format(token), user=False, is_json=False)
+        self.assertEqual(res.status_code, 200)
+
+    def test_dynamic_token_too_old_to_open_the_page(self):
+        dashboard = self.factory.create_dashboard()
+        token = generate_token(dashboard.id, self.factory.user.id)
+
+        with patch.object(settings, "DASHBOARD_KEY_EXPIRY_PERIOD", -1):
+            res = self.make_request("get", "/public/dashboards/{}".format(token), user=False, is_json=False)
+        self.assertEqual(res.status_code, 404)
+
     # Not relevant for now, as tokens in api_keys table are only created for dashboards. Once this changes, we should
     # add this test.
     # def test_token_doesnt_belong_to_dashboard(self):
@@ -106,6 +125,23 @@ class TestAPIPublicDashboard(BaseTestCase):
             user=False,
             is_json=False,
         )
+        self.assertEqual(res.status_code, 404)
+
+    def test_dynamic_token_keeps_working_after_the_page_is_open(self):
+        dashboard = self.factory.create_dashboard()
+        token = generate_token(dashboard.id, self.factory.user.id)
+
+        # Older than DASHBOARD_KEY_EXPIRY_PERIOD, but within DASHBOARD_KEY_SESSION_PERIOD.
+        with patch.object(settings, "DASHBOARD_KEY_EXPIRY_PERIOD", -1):
+            res = self.make_request("get", "/api/dashboards/public/{}".format(token), user=False, is_json=False)
+        self.assertEqual(res.status_code, 200)
+
+    def test_expired_dynamic_token(self):
+        dashboard = self.factory.create_dashboard()
+        token = generate_token(dashboard.id, self.factory.user.id)
+
+        with patch.object(settings, "DASHBOARD_KEY_SESSION_PERIOD", -1):
+            res = self.make_request("get", "/api/dashboards/public/{}".format(token), user=False, is_json=False)
         self.assertEqual(res.status_code, 404)
 
     # Not relevant for now, as tokens in api_keys table are only created for dashboards. Once this changes, we should

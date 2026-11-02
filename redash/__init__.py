@@ -14,13 +14,13 @@ from redash.app import create_app  # noqa
 from redash.destinations import import_destinations
 from redash.query_runner import import_query_runners
 
-__version__ = "24.04.0-dev"
+__version__ = "8.4.0-alpha"
 
 
 if os.environ.get("REMOTE_DEBUG"):
-    import ptvsd
+    import debugpy
 
-    ptvsd.enable_attach(address=("0.0.0.0", 5678))
+    debugpy.listen(("0.0.0.0", 5678))
 
 
 def setup_logging():

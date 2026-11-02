@@ -1,5 +1,40 @@
 # Change Log
 
+## formsflow-analytics v8.4.0-alpha - <Unreleased>
+
+From this release, the formsflow fork of Redash uses formsflow.ai version numbers, so the version moves from 24.04.0 to 8.4.0. The releases after this one in the file are upstream Redash releases.
+
+### Security
+- Fix: A request with an API key that matched nothing was authenticated as the first user of the organization. Unknown keys are now rejected.
+- Dynamic dashboard keys (`return_dynamic_key=true`) now authenticate as a read-only API user for their own dashboard. A key is accepted only if the dashboard and the user who issued the key belong to the current organization, the dashboard isn't archived, and the issuer isn't disabled. The key can run only the queries on that dashboard, including queries with text parameters.
+- Organization creation no longer logs the request body, which contains the admin password and the system user's API key. Authentication no longer logs API keys or tokens.
+- Python 3.8, which has had no security fixes since October 2024, is replaced by Python 3.14. The image is now based on `python:3.14-slim-bookworm`.
+- gunicorn 20.0.4 → 23.0.0 (CVE-2024-1135, request smuggling).
+- cryptography 41 → 50, pyOpenSSL 23 → 26, requests 2.31 → 2.34 and PyJWT 2.4 → 2.15.
+- RestrictedPython 6.2 → 8.5, which hardens the Python data source sandbox (CVE-2024-47532, CVE-2025-22153).
+
+### Added
+- `DASHBOARD_KEY_SESSION_PERIOD` setting (default 8 hours): how long an open public dashboard can keep calling the API with its dynamic key. `DASHBOARD_KEY_EXPIRY_PERIOD` (default 5 minutes) still sets the maximum age of a key when the page is opened.
+- SAML: the user's name is also read from `givenName`/`sn` and from the X.500 OIDs that Keycloak's mappers send (`urn:oid:2.5.4.42`, `urn:oid:2.5.4.4`). If the response has no name attributes, the email is used as the name.
+- `VERSION` file, used to tag Docker images.
+- `.gitattributes` rules that keep LF line endings in `bin/`, `.ci/`, `manage.py` and `*.sh`, so images built from Windows checkouts start.
+- `docs/python-3.14-upgrade.md`: what changed in the move to Python 3.14 and arm64 images, and why.
+- Docker images for `linux/arm64`. Both architectures are built on native GitHub runners and published as one multi-arch image, signed with cosign. CI also builds both architectures for every pull request.
+
+### Changed
+- Version is `8.4.0-alpha` (`VERSION`, `package.json`, `pyproject.toml`, `redash.__version__`).
+- `REDASH_VERSION_CHECK` defaults to `false`, because the check compares against upstream Redash releases.
+- Python 3.14 and Poetry 1.8.5. Dependencies that didn't support Python 3.14 were updated, including sqlalchemy-utils 0.35, supervisor 4.3, gevent 25, pandas 2.3, numpy 2, openpyxl 3.1, snowflake-connector-python 4, oracledb 3, pyodbc 5, pymssql 2.3, cassandra-driver 3.30, vertica-python 1.4, impyla 0.24, pyhive 0.7 and e6data-python-connector 3.0. See `docs/python-3.14-upgrade.md` for the full list.
+- The `debug` command's remote debugger uses debugpy instead of ptvsd. It still listens on port 5678.
+
+### Removed
+- The Qubole data source. Its SDK (`qds-sdk`) imports modules that Python 3.12 and 3.13 removed, and no release fixes this. Existing Qubole data sources no longer appear in the data source list.
+- The `sasl` package. The Hive data source uses `pure-sasl` instead.
+
+### Fixed
+- Fix: SAML login failed with a server error when the identity provider didn't send `FirstName` and `LastName` attributes.
+- Fix: `GET /api/dashboards/public/<token>` returned a server error instead of 404 for an invalid or expired dynamic key.
+
 ## V10.1.0 - 2021-11-23
 
 This release includes patches for three security vulnerabilities:

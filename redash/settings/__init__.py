@@ -33,8 +33,10 @@ DB_PASSWORD = os.getenv("REDASH_DATABASE_PASSWORD", "postgres")
 DB_HOST = os.getenv("REDASH_DATABASE_HOSTNAME", "localhost")
 DB_PORT = os.getenv("REDASH_DATABASE_PORT", "6432")
 DB_NAME = os.getenv("REDASH_DATABASE_NAME", "postgres")
-database_default_url = os.environ.get("DATABASE_URL", f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
-DATA_BASE_URL = os.getenv("REDASH_DATABASE_URL") 
+database_default_url = os.environ.get(
+    "DATABASE_URL", f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+)
+DATA_BASE_URL = os.getenv("REDASH_DATABASE_URL")
 SQLALCHEMY_DATABASE_URI = DATA_BASE_URL if DATA_BASE_URL else database_default_url
 
 SQLALCHEMY_MAX_OVERFLOW = int_or_none(os.environ.get("SQLALCHEMY_MAX_OVERFLOW"))
@@ -64,7 +66,9 @@ INVITATION_TOKEN_MAX_AGE = int(os.environ.get("REDASH_INVITATION_TOKEN_MAX_AGE",
 SECRET_KEY = os.environ.get("REDASH_COOKIE_SECRET")
 
 if SECRET_KEY is None:
-    raise Exception("You must set the REDASH_COOKIE_SECRET environment variable. Visit http://redash.io/help/open-source/admin-guide/secrets for more information.")
+    raise Exception(
+        "You must set the REDASH_COOKIE_SECRET environment variable. Visit http://redash.io/help/open-source/admin-guide/secrets for more information."
+    )
 
 # The secret key to use when encrypting data source options
 DATASOURCE_SECRET_KEY = os.environ.get("REDASH_SECRET_KEY", SECRET_KEY)
@@ -417,7 +421,8 @@ PAGE_SIZE_OPTIONS = list(
 TABLE_CELL_MAX_JSON_SIZE = int(os.environ.get("REDASH_TABLE_CELL_MAX_JSON_SIZE", 50000))
 
 # Features:
-VERSION_CHECK = parse_boolean(os.environ.get("REDASH_VERSION_CHECK", "true"))
+# Off by default: the check compares against upstream Redash releases, which formsflow versions don't follow.
+VERSION_CHECK = parse_boolean(os.environ.get("REDASH_VERSION_CHECK", "false"))
 FEATURE_DISABLE_REFRESH_QUERIES = parse_boolean(os.environ.get("REDASH_FEATURE_DISABLE_REFRESH_QUERIES", "false"))
 FEATURE_SHOW_QUERY_RESULTS_COUNT = parse_boolean(os.environ.get("REDASH_FEATURE_SHOW_QUERY_RESULTS_COUNT", "true"))
 FEATURE_ALLOW_CUSTOM_JS_VISUALIZATIONS = parse_boolean(
@@ -465,7 +470,12 @@ CSRF_TIME_LIMIT = int(os.environ.get("REDASH_CSRF_TIME_LIMIT", 3600 * 6))
 BLOCKED_DOMAINS = set_from_string(os.environ.get("REDASH_BLOCKED_DOMAINS", "qq.com"))
 
 # Dashboard dynamic key expiry period, in seconds. Default is 5 minutes.
-DASHBOARD_KEY_EXPIRY_PERIOD = int(os.environ.get("DASHBOARD_KEY_EXPIRY_PERIOD", 5*60))
+# A public dashboard page can only be opened with a dynamic key younger than this.
+DASHBOARD_KEY_EXPIRY_PERIOD = int(os.environ.get("DASHBOARD_KEY_EXPIRY_PERIOD", 5 * 60))
+
+# How long API calls from an already opened public dashboard keep accepting its dynamic key,
+# in seconds. Default is 8 hours.
+DASHBOARD_KEY_SESSION_PERIOD = int(os.environ.get("DASHBOARD_KEY_SESSION_PERIOD", 8 * 60 * 60))
 
 # Dashboard refresh period, in seconds. Default is 1 minute.
 DASHBOARD_REFRESH_PERIOD = int(os.environ.get("DASHBOARD_REFRESH_PERIOD", 60))

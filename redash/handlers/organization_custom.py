@@ -1,31 +1,28 @@
 from flask import request
-from redash.worker import get_job_logger
 
 from redash import models
-from redash.handlers.base import (
-    BaseResource
-)
+from redash.handlers.base import BaseResource
 from redash.permissions import (
     require_admin,
 )
+from redash.worker import get_job_logger
 
 logger = get_job_logger(__name__)
 
 
 class OrganizationResource(BaseResource):
-
     @require_admin
     def post(self):
         """
         Creates a new organization.
 
         """
-        logger.info("Creating new organization")
         org_payload = request.get_json(force=True)
-        logger.info("org_payload : %s", org_payload)
+        # The payload carries the admin password and the system user's API key, so only log the slug.
+        logger.info("Creating new organization %s", org_payload.get("slug"))
         org = models.Organization(
-            name=org_payload['name'],
-            slug=org_payload['slug'],
+            name=org_payload["name"],
+            slug=org_payload["slug"],
             settings={
                 "settings": {
                     "auth_password_login_enabled": True,
@@ -45,20 +42,17 @@ class OrganizationResource(BaseResource):
                     "auth_jwt_auth_issuer": "",
                     "auth_jwt_auth_public_certs_url": "",
                     "auth_jwt_auth_audience": "",
-                    "auth_jwt_auth_algorithms": [
-                        "HS256",
-                        "RS256",
-                        "ES256"
-                    ],
+                    "auth_jwt_auth_algorithms": ["HS256", "RS256", "ES256"],
                     "auth_jwt_auth_cookie_name": "",
                     "auth_jwt_auth_header_name": "",
                     "feature_show_permissions_control": False,
                     "send_email_on_failed_scheduled_queries": False,
                     "hide_plotly_mode_bar": False,
-                    "disable_public_urls": False
+                    "disable_public_urls": False,
                 },
-                "google_apps_domains": []
-            })
+                "google_apps_domains": [],
+            },
+        )
 
         admin_group = models.Group(
             name=f"{org.slug}-admin",
@@ -80,19 +74,19 @@ class OrganizationResource(BaseResource):
         # Create a system user for accessing through API.
         system_user = models.User(
             org=org,
-            name='system',
-            email=f'system@{org.slug}',
+            name="system",
+            email=f"system@{org.slug}",
             group_ids=[admin_group.id],
-            api_key=org_payload.get('userApiKey', '')
+            api_key=org_payload.get("userApiKey", ""),
         )
 
         user = models.User(
             org=org,
-            name=org_payload['userName'],
-            email=org_payload['email'],
+            name=org_payload["userName"],
+            email=org_payload["email"],
             group_ids=[admin_group.id],
         )
-        user.hash_password(org_payload.get('password', ''))
+        user.hash_password(org_payload.get("password", ""))
 
         models.db.session.add_all([user, system_user])
         models.db.session.commit()

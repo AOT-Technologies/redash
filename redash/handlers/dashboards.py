@@ -3,12 +3,13 @@ from flask_restful import abort
 from funcy import partial, project
 from sqlalchemy.orm.exc import StaleDataError
 
-from redash import models
+from redash import models, settings
+from redash.authentication import get_user_from_dashboard_token
 from redash.handlers.base import (
     BaseResource,
     filter_by_tags,
-    get_object_or_404,
     get_object,
+    get_object_or_404,
     paginate,
 )
 from redash.handlers.base import order_results as _order_results
@@ -23,15 +24,8 @@ from redash.serializers import (
     DashboardSerializer,
     public_dashboard,
 )
-from sqlalchemy.orm.exc import StaleDataError
-
+from redash.utils.dynamic_key import generate_token
 from redash.worker import get_job_logger
-
-from redash.utils.dynamic_key import generate_token, decode_token
-
-from requests.models import PreparedRequest
-from redash import settings
-
 
 logger = get_job_logger(__name__)
 
@@ -62,7 +56,9 @@ class DashboardListResource(BaseResource):
         objects.
         """
         search_term = request.args.get("q")
-        logger.debug(f"self.current_org, self.current_user.group_ids, self.current_user.id ---> {self.current_org}, {self.current_user.group_ids}, {self.current_user.id}, {search_term}")
+        logger.debug(
+            f"self.current_org, self.current_user.group_ids, self.current_user.id ---> {self.current_org}, {self.current_user.group_ids}, {self.current_user.id}, {search_term}"
+        )
         if search_term:
             results = models.Dashboard.search(
                 self.current_org,
@@ -192,13 +188,12 @@ class DashboardResource(BaseResource):
             fn = models.Dashboard.get_by_slug_and_org
         else:
             fn = models.Dashboard.get_by_id_and_org
-        return_dynamic_key = request.args.get("return_dynamic_key", "false").lower() == 'true'
+        return_dynamic_key = request.args.get("return_dynamic_key", "false").lower() == "true"
         dashboard = get_object_or_404(fn, dashboard_id, self.current_org)
         response = DashboardSerializer(dashboard, with_widgets=True, user=self.current_user).serialize()
 
         api_key = models.ApiKey.get_by_object(dashboard)
         # If the dashboard has api_key then use the default settings; else create a new token with salt.
-        logger.info("Building public URL")
         refresh_param = f"refresh={settings.DASHBOARD_REFRESH_PERIOD}"
         if api_key:
             dashboard_url = url_for(
@@ -208,11 +203,9 @@ class DashboardResource(BaseResource):
                 _external=True,
             )
             dashboard_url += f"&{refresh_param}" if "?" in dashboard_url else f"?{refresh_param}"
-            logger.info("Building public URL %s ", dashboard_url)
             response["public_url"] = dashboard_url
             response["api_key"] = api_key.api_key
         elif not dashboard.is_draft and return_dynamic_key:
-            logger.info("self.current_user.is_api_user() : %s", self.current_user.is_api_user())
             # Create a dynamic secret key
             dynamic_key = generate_token(dashboard.id, self.current_user.id)
             dashboard_url = url_for(
@@ -221,9 +214,7 @@ class DashboardResource(BaseResource):
                 org_slug=self.current_org.slug,
                 _external=True,
             )
-            logger.info("Building public URL %s ", dashboard_url)
             dashboard_url += f"&{refresh_param}" if "?" in dashboard_url else f"?{refresh_param}"
-            logger.info("Building public URL %s ", dashboard_url)
             response["public_url"] = dashboard_url
             response["api_key"] = dynamic_key
 
@@ -320,16 +311,21 @@ class PublicDashboardResource(BaseResource):
         if self.current_org.get_setting("disable_public_urls"):
             abort(400, message="Public URLs are disabled.")
 
+        dashboard = None
         if not isinstance(self.current_user, models.ApiUser):
             api_key = get_object(models.ApiKey.get_by_api_key, token)
             if api_key:
                 dashboard = api_key.object
             else:
-                decoded_token = decode_token(token)
-                if decoded_token:
-                    dashboard = models.Dashboard.get_by_id(decoded_token.get('id'))
+                token_user = get_user_from_dashboard_token(token, self.current_org)
+                if token_user:
+                    dashboard = token_user.object
         else:
             dashboard = self.current_user.object
+
+        if not dashboard:
+            abort(404)
+
         return public_dashboard(dashboard)
 
 

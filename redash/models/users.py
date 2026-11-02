@@ -383,8 +383,10 @@ class AnonymousUser(AnonymousUserMixin, PermissionsCheckMixin):
 
 
 class ApiUser(UserMixin, PermissionsCheckMixin):
-    def __init__(self, api_key, org, groups, name=None):
-        self.object = None
+    def __init__(self, api_key, org, groups, name=None, obj=None, dynamic=False):
+        self.object = obj
+        # True when authenticated with a signed dynamic dashboard token (redash.utils.dynamic_key).
+        self.is_dynamic_token = dynamic
         if isinstance(api_key, str):
             self.id = api_key
             self.name = name

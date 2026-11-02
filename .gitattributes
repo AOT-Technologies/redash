@@ -1,0 +1,7 @@
+# Scripts that run on Linux (inside the Docker image or in CI) must keep LF line endings,
+# even in Windows checkouts with core.autocrlf=true. A CRLF shebang ("#!/bin/bash\r") makes
+# every Redash container fail with "exec /app/bin/docker-entrypoint: no such file or directory".
+bin/* text eol=lf
+.ci/* text eol=lf
+manage.py text eol=lf
+*.sh text eol=lf

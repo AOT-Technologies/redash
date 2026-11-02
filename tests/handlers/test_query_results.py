@@ -1,5 +1,7 @@
 from redash.handlers.query_results import error_messages, run_query
 from redash.models import db
+from redash.utils import json_dumps
+from redash.utils.dynamic_key import generate_token
 from tests import BaseTestCase
 
 
@@ -281,6 +283,35 @@ class TestQueryResultAPI(BaseTestCase):
         )
         self.assertEqual(rv.status_code, 403)
         self.assertDictEqual(rv.json, error_messages["unsafe_when_shared"][0])
+
+    def post_with_dynamic_token(self, query, dashboard, data):
+        token = generate_token(dashboard.id, self.factory.user.id)
+        return self.client.post(
+            "/{}/api/queries/{}/results".format(self.factory.org.slug, query.id),
+            data=json_dumps(data),
+            headers={"Authorization": "Key {}".format(token)},
+            content_type="application/json",
+        )
+
+    def test_allows_execution_of_dashboard_queries_with_text_parameters_using_dynamic_token(self):
+        ds = self.factory.create_data_source(group=self.factory.org.default_group, view_only=True)
+        query = self.factory.create_query(data_source=ds, options={"parameters": [{"name": "foo", "type": "text"}]})
+        dashboard = self.factory.create_dashboard()
+        self.factory.create_widget(
+            dashboard=dashboard, visualization=self.factory.create_visualization(query_rel=query)
+        )
+
+        rv = self.post_with_dynamic_token(query, dashboard, {"parameters": {"foo": "bar"}, "max_age": 0})
+        self.assertEqual(rv.status_code, 200)
+        self.assertIn("job", rv.json)
+
+    def test_prevents_execution_of_queries_off_the_dashboard_using_dynamic_token(self):
+        dashboard = self.factory.create_dashboard()
+        self.factory.create_widget(dashboard=dashboard)
+        other_query = self.factory.create_query()
+
+        rv = self.post_with_dynamic_token(other_query, dashboard, {"parameters": {}})
+        self.assertEqual(rv.status_code, 403)
 
     def test_access_with_query_api_key(self):
         ds = self.factory.create_data_source(group=self.factory.org.default_group, view_only=False)

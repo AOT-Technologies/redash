@@ -15,6 +15,7 @@ from redash.authentication import jwt_auth
 from redash.authentication.org_resolving import current_org
 from redash.settings.organization import settings as org_settings
 from redash.tasks import record_event
+from redash.utils.dynamic_key import decode_token
 
 login_manager = LoginManager()
 logger = logging.getLogger("authentication")
@@ -43,7 +44,6 @@ def sign(key, path, expires):
 
 @login_manager.user_loader
 def load_user(user_id_with_identity):
-    logger.info("000000000")
     user = api_key_load_user_from_request(request)
     if user:
         return user
@@ -62,7 +62,6 @@ def load_user(user_id_with_identity):
 
 
 def request_loader(request):
-    logger.info("1111111")
     user = None
     if settings.AUTH_TYPE == "hmac":
         user = hmac_load_user_from_request(request)
@@ -107,8 +106,7 @@ def hmac_load_user_from_request(request):
     return None
 
 
-def get_user_from_api_key(api_key, query_id, request=None):
-    logger.info(f"get_user_from_api_key---->> {api_key} ---> {query_id}")
+def get_user_from_api_key(api_key, query_id):
     if not api_key:
         return None
 
@@ -116,18 +114,14 @@ def get_user_from_api_key(api_key, query_id, request=None):
 
     # TODO: once we switch all api key storage into the ApiKey model, this code will be much simplified
     org = current_org._get_current_object()
-    logger.info(f"org---->> {org}")
     try:
         user = models.User.get_by_api_key_and_org(api_key, org)
         if user.is_disabled:
             user = None
     except models.NoResultFound:
-        logger.info("---NoResultFound----")
         try:
             api_key = models.ApiKey.get_by_api_key(api_key)
-            logger.info(f"api_key --- {api_key}")
             user = models.ApiUser(api_key, api_key.org, [])
-            logger.info(f"user --- {user}")
         except models.NoResultFound:
             if query_id:
                 query = models.Query.get_by_id_and_org(query_id, org)
@@ -138,11 +132,45 @@ def get_user_from_api_key(api_key, query_id, request=None):
                         list(query.groups.keys()),
                         name="ApiKey: Query {}".format(query.id),
                     )
-    if user is None and org is not None:
-        logger.info("User not found")
-        user = models.User.get_by_org(org).first()
-    logger.info(f"user --------->>>> {user}")
+
+            if user is None:
+                user = get_user_from_dashboard_token(api_key, org)
+
     return user
+
+
+def get_user_from_dashboard_token(token, org, max_age=None):
+    """Resolve a dynamic dashboard token (see redash.utils.dynamic_key) to an ApiUser scoped to that dashboard."""
+    if org is None:
+        return None
+
+    if max_age is None:
+        max_age = settings.DASHBOARD_KEY_SESSION_PERIOD
+
+    claims = decode_token(token, max_age=max_age)
+    dashboard_id = claims.get("id")
+    issuer_id = claims.get("user")
+    if not isinstance(dashboard_id, int) or not isinstance(issuer_id, int):
+        return None
+
+    # The dashboard and the user who issued the token must both belong to the current organization.
+    try:
+        dashboard = models.Dashboard.get_by_id_and_org(dashboard_id, org)
+        issuer = models.User.get_by_id_and_org(issuer_id, org)
+    except models.NoResultFound:
+        return None
+
+    if dashboard.is_archived or issuer.is_disabled:
+        return None
+
+    return models.ApiUser(
+        token,
+        org,
+        [],
+        name="Dashboard token: {} (issued by user {})".format(dashboard.id, issuer.id),
+        obj=dashboard,
+        dynamic=True,
+    )
 
 
 def get_api_key_from_request(request):
@@ -161,11 +189,10 @@ def get_api_key_from_request(request):
 
 
 def api_key_load_user_from_request(request):
-    logger.info("2222222")
     api_key = get_api_key_from_request(request)
     if request.view_args is not None:
         query_id = request.view_args.get("query_id", None)
-        user = get_user_from_api_key(api_key, query_id, request)
+        user = get_user_from_api_key(api_key, query_id)
     else:
         user = None
 
@@ -226,7 +253,6 @@ def log_user_logged_in(app, user):
 
 @login_manager.unauthorized_handler
 def redirect_to_login():
-    logger.info("Insode redirect_to_login --->>>>")
     is_xhr = request.headers.get("X-Requested-With") == "XMLHttpRequest"
     if is_xhr or "/api/" in request.path:
         return {"message": "Couldn't find resource. Please login and try again."}, 404
@@ -281,7 +307,6 @@ def init_app(app):
 
 
 def create_and_login_user(org, name, email, picture=None):
-    logger.info("create_and_login_user ", org, name, email)
     try:
         user_object = models.User.get_by_email_and_org(email, org)
         if user_object.is_disabled:

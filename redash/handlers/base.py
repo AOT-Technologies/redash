@@ -51,11 +51,13 @@ def record_event(org, user, options):
     if user.is_api_user():
         options.update({"api_key": user.name, "org_id": org.id})
     else:
-        options.update({
-            "user_id": user.id if hasattr(user, "id") else None,
-            "user_name": user.name if hasattr(user, "name") else None,
-            "org_id": org.id
-        })
+        options.update(
+            {
+                "user_id": user.id if hasattr(user, "id") else None,
+                "user_name": user.name if hasattr(user, "name") else None,
+                "org_id": org.id,
+            }
+        )
 
     options.update({"user_agent": request.user_agent.string, "ip": request.remote_addr})
 

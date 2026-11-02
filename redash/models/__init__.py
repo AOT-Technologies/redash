@@ -814,6 +814,16 @@ class Query(ChangeTrackingMixin, TimestampMixin, BelongsToOrgMixin, db.Model):
         api_keys = db.session.execute(query, {"id": self.id}).fetchall()
         return [api_key[0] for api_key in api_keys]
 
+    def is_on_dashboard(self, dashboard_id):
+        query = """SELECT 1
+                   FROM widgets
+                   JOIN visualizations ON widgets.visualization_id = visualizations.id
+                   WHERE widgets.dashboard_id = :dashboard_id
+                     AND visualizations.query_id = :id
+                   LIMIT 1"""
+
+        return db.session.execute(query, {"id": self.id, "dashboard_id": dashboard_id}).first() is not None
+
     def update_query_hash(self):
         should_apply_auto_limit = self.options.get("apply_auto_limit", False) if self.options else False
         query_runner = self.data_source.query_runner if self.data_source else BaseQueryRunner({})

@@ -10,6 +10,8 @@ permissions:
 
 jobs:
   bump-version-and-tag:
+    # Upstream Redash release process; formsflow versions come from VERSION instead.
+    if: github.repository == 'getredash/redash'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

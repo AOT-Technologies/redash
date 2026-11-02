@@ -1,174 +1,241 @@
-name: Tests
+name: CI - formsflow-analytics
+
 on:
+  workflow_dispatch:
+
   push:
     branches:
-      - master
-  pull_request_target:
+      - formsflow
+
+  pull_request:
     branches:
-      - master
+      - formsflow
+      - formsflow-merge
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
 env:
   NODE_VERSION: 18
+
 jobs:
+
   backend-lint:
-    runs-on: ubuntu-22.04
+    name: Backend Lint
+    runs-on: ubuntu-24.04
+
     steps:
-      - if: github.event.pull_request.mergeable == 'false'
-        name: Exit if PR is not mergeable
-        run: exit 1
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      # The pinned black and ruff versions don't need the app's Python 3.14 runtime, which runs in the Docker image.
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          fetch-depth: 1
-          ref: ${{ github.event.pull_request.head.sha }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.8'
-      - run: sudo pip install black==23.1.0 ruff==0.0.287
-      - run: ruff check .
-      - run: black --check .
+          python-version: "3.11"
+
+      - name: Install linters
+        run: |
+          pip install black==23.1.0 ruff==0.0.287
+
+      - name: Ruff
+        run: |
+          ruff check .
+
+      - name: Black
+        run: |
+          black --check .
 
   backend-unit-tests:
-    runs-on: ubuntu-22.04
+    name: Backend Unit Test
     needs: backend-lint
+    runs-on: ubuntu-24.04
+
     env:
       COMPOSE_FILE: .ci/compose.ci.yaml
       COMPOSE_PROJECT_NAME: redash
       COMPOSE_DOCKER_CLI_BUILD: 1
       DOCKER_BUILDKIT: 1
+
     steps:
-      - if: github.event.pull_request.mergeable == 'false'
-        name: Exit if PR is not mergeable
-        run: exit 1
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
       - name: Build Docker Images
         run: |
           set -x
           docker compose build --build-arg install_groups="main,all_ds,dev"
           docker compose up -d
           sleep 10
+
       - name: Create Test Database
-        run: docker compose -p redash run --rm postgres psql -h postgres -U postgres -c "create database tests;"
+        run: |
+          docker compose -p redash run --rm postgres psql -h postgres -U postgres -c "create database tests;"
+
       - name: List Enabled Query Runners
-        run: docker compose -p redash run --rm redash manage ds list_types
+        run: |
+          docker compose -p redash run --rm redash manage ds list_types
+
       - name: Run Tests
-        run: docker compose -p redash run --name tests redash tests --junitxml=junit.xml --cov-report=xml --cov=redash --cov-config=.coveragerc tests/
+        run: |
+          docker compose -p redash run --name tests redash tests --junitxml=junit.xml --cov-report=xml --cov=redash --cov-config=.coveragerc tests/
+
       - name: Copy Test Results
+        if: always()
         run: |
           mkdir -p /tmp/test-results/unit-tests
           docker cp tests:/app/coverage.xml ./coverage.xml
           docker cp tests:/app/junit.xml /tmp/test-results/unit-tests/results.xml
-      - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v3
+
       - name: Store Test Results
-        uses: actions/upload-artifact@v3
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: test-results
           path: /tmp/test-results
+
       - name: Store Coverage Results
-        uses: actions/upload-artifact@v3
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage
           path: coverage.xml
 
   frontend-lint:
-    runs-on: ubuntu-22.04
+    name: Frontend Lint
+    runs-on: ubuntu-24.04
+
     steps:
-      - if: github.event.pull_request.mergeable == 'false'
-        name: Exit if PR is not mergeable
-        run: exit 1
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-          ref: ${{ github.event.pull_request.head.sha }}
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'yarn'
-      - name: Install Dependencies
+          cache: yarn
+
+      - name: Install dependencies
         run: |
           npm install --global --force yarn@1.22.19
           yarn cache clean && yarn --frozen-lockfile --network-concurrency 1
-      - name: Run Lint
-        run: yarn lint:ci
-      - name: Store Test Results
-        uses: actions/upload-artifact@v3
-        with:
-          name: test-results
-          path: /tmp/test-results
+
+      - name: Lint
+        run: |
+          yarn lint:ci
 
   frontend-unit-tests:
-    runs-on: ubuntu-22.04
+    name: Frontend Unit Test
     needs: frontend-lint
-    steps:
-      - if: github.event.pull_request.mergeable == 'false'
-        name: Exit if PR is not mergeable
-        run: exit 1
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-          ref: ${{ github.event.pull_request.head.sha }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'yarn'
-      - name: Install Dependencies
-        run: |
-          npm install --global --force yarn@1.22.19
-          yarn cache clean && yarn --frozen-lockfile --network-concurrency 1
-      - name: Run App Tests
-        run: yarn test
-      - name: Run Visualizations Tests
-        run: cd viz-lib && yarn test
-      - run: yarn lint
+    runs-on: ubuntu-24.04
 
-  frontend-e2e-tests:
-    runs-on: ubuntu-22.04
-    needs: frontend-lint
-    env:
-      COMPOSE_FILE: .ci/compose.cypress.yaml
-      COMPOSE_PROJECT_NAME: cypress
-      CYPRESS_INSTALL_BINARY: 0
-      PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: 1
-      PERCY_TOKEN: ${{ secrets.PERCY_TOKEN }}
-      CYPRESS_PROJECT_ID: ${{ secrets.CYPRESS_PROJECT_ID }}
-      CYPRESS_RECORD_KEY: ${{ secrets.CYPRESS_RECORD_KEY }}
     steps:
-      - if: github.event.pull_request.mergeable == 'false'
-        name: Exit if PR is not mergeable
-        run: exit 1
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-          ref: ${{ github.event.pull_request.head.sha }}
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'yarn'
-      - name: Enable Code Coverage Report For Master Branch
-        if: endsWith(github.ref, '/master')
-        run: |
-          echo "CODE_COVERAGE=true" >> "$GITHUB_ENV"
-      - name: Install Dependencies
+          cache: yarn
+
+      - name: Install dependencies
         run: |
           npm install --global --force yarn@1.22.19
           yarn cache clean && yarn --frozen-lockfile --network-concurrency 1
-      - name: Setup Redash Server
+
+      - name: Run app tests
         run: |
-          set -x
-          yarn cypress build
-          yarn cypress start -- --skip-db-seed
-          docker compose run cypress yarn cypress db-seed
-      - name: Execute Cypress Tests
-        run: yarn cypress run-ci
-      - name: "Failure: output container logs to console"
-        if: failure()
-        run: docker compose logs
-      - name: Copy Code Coverage Results
-        run: docker cp cypress:/usr/src/app/coverage ./coverage || true
-      - name: Store Coverage Results
-        uses: actions/upload-artifact@v3
+          yarn test
+
+      - name: Run visualizations tests
+        run: |
+          cd viz-lib && yarn test
+
+  build:
+    name: Build and Trivy Security Scan
+    needs:
+      - backend-unit-tests
+      - frontend-unit-tests
+    runs-on: ${{ matrix.runner }}
+
+    # Each architecture builds on a native runner, so arm64 build failures show up before merge.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            --tag formsflow-analytics:ci \
+            .
+
+      - name: Verify Docker image
+        run: |
+          docker image inspect formsflow-analytics:ci
+
+      # Scanned in this job rather than a separate one, so the image is only built once.
+      - name: Run Trivy image scan
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
-          name: coverage
-          path: coverage
+          image-ref: formsflow-analytics:ci
+          format: table
+          exit-code: "0"
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
+  snyk:
+    name: Snyk Security Scan
+    needs: build
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Snyk
+        run: |
+          npm install -g snyk
+
+      - name: Authenticate Snyk
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          snyk auth "$SNYK_TOKEN"
+
+      - name: Snyk Open Source
+        continue-on-error: true
+        run: |
+          snyk test \
+            --all-projects \
+            --severity-threshold=high
+
+      - name: Snyk Code
+        continue-on-error: true
+        run: |
+          snyk code test \
+            --severity-threshold=high

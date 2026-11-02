@@ -9,6 +9,8 @@ env:
 
 jobs:
   build-skip-check:
+    # Upstream Redash preview images; formsflow images are built by formsflow-analytics-push-to-dockerhub.yml.
+    if: github.repository == 'getredash/redash'
     runs-on: ubuntu-22.04
     outputs:
       skip: ${{ steps.skip-check.outputs.skip }}

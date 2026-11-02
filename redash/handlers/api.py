@@ -28,6 +28,7 @@ from redash.handlers.data_sources import (
     DataSourceTestResource,
     DataSourceTypeListResource,
 )
+
 # from redash.handlers.databricks import (
 #     DatabricksDatabaseListResource,
 #     DatabricksSchemaResource,
@@ -282,13 +283,9 @@ api.add_org_resource(DestinationListResource, "/api/destinations", endpoint="des
 api.add_org_resource(QuerySnippetResource, "/api/query_snippets/<snippet_id>", endpoint="query_snippet")
 api.add_org_resource(QuerySnippetListResource, "/api/query_snippets", endpoint="query_snippets")
 
-api.add_org_resource(
-    OrganizationSettings, "/api/settings/organization", endpoint="organization_settings"
-)
+api.add_org_resource(OrganizationSettings, "/api/settings/organization", endpoint="organization_settings")
 
 # Add custom endpoints
-from redash.handlers.organization_custom import OrganizationResource
+from redash.handlers.organization_custom import OrganizationResource  # noqa: E402
 
-api.add_resource(
-    OrganizationResource, "/api/organization", endpoint="organization"
-)
+api.add_resource(OrganizationResource, "/api/organization", endpoint="organization")
