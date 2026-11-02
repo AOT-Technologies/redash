@@ -18,13 +18,12 @@ From this release, the formsflow fork of Redash uses formsflow.ai version number
 - SAML: the user's name is also read from `givenName`/`sn` and from the X.500 OIDs that Keycloak's mappers send (`urn:oid:2.5.4.42`, `urn:oid:2.5.4.4`). If the response has no name attributes, the email is used as the name.
 - `VERSION` file, used to tag Docker images.
 - `.gitattributes` rules that keep LF line endings in `bin/`, `.ci/`, `manage.py` and `*.sh`, so images built from Windows checkouts start.
-- `docs/python-3.14-upgrade.md`: what changed in the move to Python 3.14 and arm64 images, and why.
 - Docker images for `linux/arm64`. Both architectures are built on native GitHub runners and published as one multi-arch image, signed with cosign. CI also builds both architectures for every pull request.
 
 ### Changed
 - Version is `8.4.0-alpha` (`VERSION`, `package.json`, `pyproject.toml`, `redash.__version__`).
 - `REDASH_VERSION_CHECK` defaults to `false`, because the check compares against upstream Redash releases.
-- Python 3.14 and Poetry 1.8.5. Dependencies that didn't support Python 3.14 were updated, including sqlalchemy-utils 0.35, supervisor 4.3, gevent 25, pandas 2.3, numpy 2, openpyxl 3.1, snowflake-connector-python 4, oracledb 3, pyodbc 5, pymssql 2.3, cassandra-driver 3.30, vertica-python 1.4, impyla 0.24, pyhive 0.7 and e6data-python-connector 3.0. See `docs/python-3.14-upgrade.md` for the full list.
+- Python 3.14 and Poetry 1.8.5. Dependencies that didn't support Python 3.14 were updated, including sqlalchemy-utils 0.35, supervisor 4.3, gevent 25, pandas 2.3, numpy 2, openpyxl 3.1, snowflake-connector-python 4, oracledb 3, pyodbc 5, pymssql 2.3, cassandra-driver 3.30, vertica-python 1.4, impyla 0.24, pyhive 0.7 and e6data-python-connector 3.0.
 - The `debug` command's remote debugger uses debugpy instead of ptvsd. It still listens on port 5678.
 
 ### Removed
@@ -33,6 +32,7 @@ From this release, the formsflow fork of Redash uses formsflow.ai version number
 
 ### Fixed
 - Fix: SAML login failed with a server error when the identity provider didn't send `FirstName` and `LastName` attributes.
+- Fix: the `inline_tags` migration used a regular expression with an invalid escape sequence, which is a `SyntaxWarning` on Python 3.12 and later. It now uses a raw string.
 - Fix: `GET /api/dashboards/public/<token>` returned a server error instead of 404 for an invalid or expired dynamic key.
 
 ## V10.1.0 - 2021-11-23
