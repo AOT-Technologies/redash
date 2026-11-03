@@ -11,8 +11,12 @@ class TestUnembedables(BaseTestCase):
         query = self.factory.create_query()
         res = self.make_request("get", "/api/queries/{0}".format(query.id))
         self.assertEqual(res.status_code, 200)
-        self.assertIn("frame-ancestors 'none'", res.headers["Content-Security-Policy"])
-        self.assertEqual(res.headers["X-Frame-Options"], "deny")
+        # The fork's default CSP lets formsflow (*.aot-technologies.com) frame the app, but nobody else.
+        csp = res.headers["Content-Security-Policy"]
+        self.assertIn("frame-ancestors 'self' *.aot-technologies.com", csp)
+        self.assertNotIn("frame-ancestors *", csp)
+        # X-Frame-Options is not set by default (REDASH_FRAME_OPTIONS is empty); CSP frame-ancestors governs framing.
+        self.assertNotIn("X-Frame-Options", res.headers)
 
 
 class TestEmbedVisualization(BaseTestCase):
