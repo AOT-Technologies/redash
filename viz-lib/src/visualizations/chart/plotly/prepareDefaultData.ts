@@ -1,10 +1,18 @@
 import { isNil, extend, each, includes, map, sortBy, toString } from "lodash";
 import chooseTextColorForBackground from "@/lib/chooseTextColorForBackground";
-import { ColorPaletteArray } from "@/visualizations/ColorPalette";
+import { AllColorPaletteArrays, ColorPaletteTypes } from "@/visualizations/ColorPalette";
 import { cleanNumber, normalizeValue, getSeriesAxis } from "./utils";
 
-function getSeriesColor(seriesOptions: any, seriesIndex: any) {
-  return seriesOptions.color || ColorPaletteArray[seriesIndex % ColorPaletteArray.length];
+function getSeriesColor(options: any, seriesOptions: any, seriesIndex: any, numSeries: any) {
+  // @ts-expect-error ts-migrate(7053) FIXME: Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
+  let palette = AllColorPaletteArrays[options.color_scheme];
+  // @ts-expect-error ts-migrate(7053) FIXME: Element implicitly has an 'any' type because expre... Remove this comment to see the full error message
+  if (ColorPaletteTypes[options.color_scheme] === "continuous" && palette.length > numSeries) {
+    const step = (palette.length - 1) / (numSeries - 1 || 1);
+    const index = Math.round(step * seriesIndex);
+    return seriesOptions.color || palette[index % palette.length];
+  }
+  return seriesOptions.color || palette[seriesIndex % palette.length];
 }
 
 function getHoverInfoPattern(options: any) {
@@ -18,20 +26,30 @@ function getHoverInfoPattern(options: any) {
 
 function prepareBarSeries(series: any, options: any, additionalOptions: any) {
   series.type = "bar";
-  series.offsetgroup = toString(additionalOptions.index);
+  if (!options.series.stacking) {
+    series.offsetgroup = toString(additionalOptions.index);
+  }
   if (options.showDataLabels) {
     series.textposition = "inside";
+  } else {
+    series.textposition = "none";
   }
   return series;
 }
 
 function prepareLineSeries(series: any, options: any) {
   series.mode = "lines" + (options.showDataLabels ? "+text" : "");
+  series.line = {
+    shape: options.lineShape,
+  };
   return series;
 }
 
 function prepareAreaSeries(series: any, options: any) {
   series.mode = "lines" + (options.showDataLabels ? "+text" : "");
+  series.line = {
+    shape: options.lineShape,
+  };
   series.fill = options.series.stacking ? "tonexty" : "tozeroy";
   return series;
 }
@@ -47,7 +65,7 @@ function prepareBubbleSeries(series: any, options: any, { seriesColor, data }: a
   series.mode = "markers";
   series.marker = {
     color: seriesColor,
-    size: map(data, i => i.size * coefficient),
+    size: map(data, (i) => i.size * coefficient),
     sizemode: options.sizemode || "diameter",
   };
   return series;
@@ -71,34 +89,56 @@ function prepareBoxSeries(series: any, options: any, { seriesColor }: any) {
   return series;
 }
 
-function prepareSeries(series: any, options: any, additionalOptions: any) {
+function prepareSeries(series: any, options: any, numSeries: any, additionalOptions: any) {
   const { hoverInfoPattern, index } = additionalOptions;
 
   const seriesOptions = extend({ type: options.globalSeriesType, yAxis: 0 }, options.seriesOptions[series.name]);
-  const seriesColor = getSeriesColor(seriesOptions, index);
+  const seriesColor = getSeriesColor(options, seriesOptions, index, numSeries);
   const seriesYAxis = getSeriesAxis(series, options);
 
   // Sort by x - `Map` preserves order of items
-  const data = options.sortX ? sortBy(series.data, d => normalizeValue(d.x, options.xAxis.type)) : series.data;
+  const data = options.sortX ? sortBy(series.data, (d) => normalizeValue(d.x, options.xAxis.type)) : series.data;
 
   // For bubble/scatter charts `y` may be any (similar to `x`) - numeric is only bubble size;
   // for other types `y` is always number
   const cleanYValue = includes(["bubble", "scatter"], seriesOptions.type)
-    ? normalizeValue
+    ? (v: any, axixType: any) => {
+        v = normalizeValue(v, axixType);
+        return includes(["scatter"], seriesOptions.type) && options.missingValuesAsZero && isNil(v) ? 0.0 : v;
+      }
     : (v: any) => {
         v = cleanNumber(v);
         return options.missingValuesAsZero && isNil(v) ? 0.0 : v;
       };
 
   const sourceData = new Map();
-  const xValues: any = [];
-  const yValues: any = [];
+  const xValues: any[] = [];
+  const yValues: any[] = [];
+
   const yErrorValues: any = [];
-  each(data, row => {
+  each(data, (row) => {
     const x = normalizeValue(row.x, options.xAxis.type); // number/datetime/category
     const y = cleanYValue(row.y, seriesYAxis === "y2" ? options.yAxis[1].type : options.yAxis[0].type); // depends on series type!
     const yError = cleanNumber(row.yError); // always number
     const size = cleanNumber(row.size); // always number
+
+    // aggregate y value for the same x
+    if (!isNil(x) && ["column", "line", "area"].includes(seriesOptions.type)) {
+      const item = sourceData.get(x);
+
+      if (item) {
+        if (!isNil(y)) {
+          item.y = (isNil(item.y) ? 0.0 : item.y) + y;
+        }
+        if (!isNil(yError)) {
+          item.yError = (isNil(item.yError) ? 0.0 : item.yError) + yError;
+        }
+        yValues[item.index] = item.y;
+        yErrorValues[item.index] = item.yError;
+        return;
+      }
+    }
+
     sourceData.set(x, {
       x,
       y,
@@ -106,6 +146,7 @@ function prepareSeries(series: any, options: any, additionalOptions: any) {
       size,
       yPercent: null, // will be updated later
       row,
+      index: xValues.length,
     });
     xValues.push(x);
     yValues.push(y);
@@ -157,6 +198,7 @@ export default function prepareDefaultData(seriesList: any, options: any) {
   const additionalOptions = {
     hoverInfoPattern: getHoverInfoPattern(options),
   };
+  const numSeries = seriesList.length;
 
-  return map(seriesList, (series, index) => prepareSeries(series, options, { ...additionalOptions, index }));
+  return map(seriesList, (series, index) => prepareSeries(series, options, numSeries, { ...additionalOptions, index }));
 }

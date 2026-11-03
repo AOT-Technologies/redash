@@ -9,6 +9,7 @@ from redash.models.parameterized_query import (
     QueryDetachedFromDataSourceError,
 )
 from redash.monitor import rq_job_ids
+from redash.query_runner import NotSupported
 from redash.tasks.failure_report import track_failure
 from redash.utils import json_dumps, sentry
 from redash.worker import get_job_logger, job
@@ -96,7 +97,7 @@ def refresh_queries():
                 query.data_source,
                 query.user_id,
                 scheduled_query=query,
-                metadata={"query_id": query.id, "Username": query.user.get_actual_user()},
+                metadata={"query_id": query.id, "user_id": query.user_id},
             )
             enqueued.append(query)
         except Exception as e:
@@ -157,7 +158,7 @@ def remove_ghost_locks():
     logger.info("Locks found: {}, Locks removed: {}".format(len(locks), count))
 
 
-@job("schemas")
+@job("schemas", timeout=settings.SCHEMAS_REFRESH_TIMEOUT)
 def refresh_schema(data_source_id):
     ds = models.DataSource.get_by_id(data_source_id)
     logger.info("task=refresh_schema state=start ds_id=%s", ds.id)
@@ -177,6 +178,8 @@ def refresh_schema(data_source_id):
             time.time() - start_time,
         )
         statsd_client.incr("refresh_schema.timeout")
+    except NotSupported:
+        logger.debug("Datasource %s does not support schema refresh", ds.name)
     except Exception:
         logger.warning("Failed refreshing schema for the data source: %s", ds.name, exc_info=1)
         statsd_client.incr("refresh_schema.error")

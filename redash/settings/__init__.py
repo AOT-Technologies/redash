@@ -58,6 +58,7 @@ QUERY_RESULTS_EXPIRED_TTL_ENABLED = parse_boolean(os.environ.get("REDASH_QUERY_R
 QUERY_RESULTS_EXPIRED_TTL = int(os.environ.get("REDASH_QUERY_RESULTS_EXPIRED_TTL", "86400"))
 
 SCHEMAS_REFRESH_SCHEDULE = int(os.environ.get("REDASH_SCHEMAS_REFRESH_SCHEDULE", 30))
+SCHEMAS_REFRESH_TIMEOUT = int(os.environ.get("REDASH_SCHEMAS_REFRESH_TIMEOUT", 300))
 
 AUTH_TYPE = os.environ.get("REDASH_AUTH_TYPE", "api_key")
 INVITATION_TOKEN_MAX_AGE = int(os.environ.get("REDASH_INVITATION_TOKEN_MAX_AGE", 60 * 60 * 24 * 7))
@@ -89,6 +90,7 @@ SESSION_COOKIE_SECURE = parse_boolean(os.environ.get("REDASH_SESSION_COOKIE_SECU
 # Whether the session cookie is set HttpOnly.
 SESSION_COOKIE_HTTPONLY = parse_boolean(os.environ.get("REDASH_SESSION_COOKIE_HTTPONLY", "true"))
 SESSION_EXPIRY_TIME = int(os.environ.get("REDASH_SESSION_EXPIRY_TIME", 60 * 60 * 6))
+SESSION_COOKIE_NAME = os.environ.get("REDASH_SESSION_COOKIE_NAME", "session")
 
 # Whether the session cookie is set to secure.
 REMEMBER_COOKIE_SECURE = parse_boolean(os.environ.get("REDASH_REMEMBER_COOKIE_SECURE") or str(COOKIES_SECURE))
@@ -141,6 +143,13 @@ REFERRER_POLICY = os.environ.get("REDASH_REFERRER_POLICY", "strict-origin-when-c
 FEATURE_POLICY = os.environ.get("REDASH_FEATURE_POLICY", "")
 
 MULTI_ORG = parse_boolean(os.environ.get("REDASH_MULTI_ORG", "false"))
+
+# If Redash is behind a proxy it might sometimes receive a X-Forwarded-Proto of HTTP
+# even if your actual Redash URL scheme is HTTPS. This will cause Flask to build
+# the OAuth redirect URL incorrectly thus failing auth. This is especially common if
+# you're behind a SSL/TCP configured AWS ELB or similar.
+# This setting will force the URL scheme.
+GOOGLE_OAUTH_SCHEME_OVERRIDE = os.environ.get("REDASH_GOOGLE_OAUTH_SCHEME_OVERRIDE", "")
 
 GOOGLE_CLIENT_ID = os.environ.get("REDASH_GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.environ.get("REDASH_GOOGLE_CLIENT_SECRET", "")
@@ -320,7 +329,6 @@ default_query_runners = [
     "redash.query_runner.salesforce",
     "redash.query_runner.query_results",
     "redash.query_runner.prometheus",
-    "redash.query_runner.qubole",
     "redash.query_runner.db2",
     "redash.query_runner.druid",
     "redash.query_runner.kylin",
@@ -348,6 +356,8 @@ default_query_runners = [
     "redash.query_runner.oracle",
     "redash.query_runner.e6data",
     "redash.query_runner.risingwave",
+    "redash.query_runner.d1",
+    "redash.query_runner.duckdb",
 ]
 
 enabled_query_runners = array_from_string(
@@ -425,8 +435,9 @@ TABLE_CELL_MAX_JSON_SIZE = int(os.environ.get("REDASH_TABLE_CELL_MAX_JSON_SIZE",
 VERSION_CHECK = parse_boolean(os.environ.get("REDASH_VERSION_CHECK", "false"))
 FEATURE_DISABLE_REFRESH_QUERIES = parse_boolean(os.environ.get("REDASH_FEATURE_DISABLE_REFRESH_QUERIES", "false"))
 FEATURE_SHOW_QUERY_RESULTS_COUNT = parse_boolean(os.environ.get("REDASH_FEATURE_SHOW_QUERY_RESULTS_COUNT", "true"))
+# Custom chart code runs with the viewer's privileges. Enable only for trusted authors.
 FEATURE_ALLOW_CUSTOM_JS_VISUALIZATIONS = parse_boolean(
-    os.environ.get("REDASH_FEATURE_ALLOW_CUSTOM_JS_VISUALIZATIONS", "true")
+    os.environ.get("REDASH_FEATURE_ALLOW_CUSTOM_JS_VISUALIZATIONS", "false")
 )
 FEATURE_AUTO_PUBLISH_NAMED_QUERIES = parse_boolean(os.environ.get("REDASH_FEATURE_AUTO_PUBLISH_NAMED_QUERIES", "true"))
 FEATURE_EXTENDED_ALERT_OPTIONS = parse_boolean(os.environ.get("REDASH_FEATURE_EXTENDED_ALERT_OPTIONS", "false"))
@@ -454,6 +465,17 @@ SQLPARSE_FORMAT_OPTIONS = {
     "reindent": parse_boolean(os.environ.get("SQLPARSE_FORMAT_REINDENT", "true")),
     "keyword_case": os.environ.get("SQLPARSE_FORMAT_KEYWORD_CASE", "upper"),
 }
+
+# sqlparse refuses to group statements beyond these limits, raising SQLParseError,
+# to bound the CPU it will spend on a single statement. The defaults match
+# sqlparse's own. Raise them if your users run legitimately huge queries (long
+# IN lists, wide SELECTs, many VALUES tuples) and you would rather pay the CPU
+# than lose auto limit and query formatting on them. Set to 0 to disable a limit
+# entirely -- note that formatting cost grows faster than linearly with
+# statement size, so an unbounded limit lets one request occupy a worker for a
+# long time.
+SQLPARSE_MAX_GROUPING_TOKENS = int(os.environ.get("SQLPARSE_MAX_GROUPING_TOKENS", 10000))
+SQLPARSE_MAX_GROUPING_DEPTH = int(os.environ.get("SQLPARSE_MAX_GROUPING_DEPTH", 100))
 
 # requests
 REQUESTS_ALLOW_REDIRECTS = parse_boolean(os.environ.get("REDASH_REQUESTS_ALLOW_REDIRECTS", "false"))

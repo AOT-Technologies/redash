@@ -2,6 +2,7 @@ import calendar
 import datetime
 import logging
 import numbers
+import re
 import time
 
 import pytz
@@ -46,6 +47,7 @@ from redash.models.parameterized_query import (
     QueryDetachedFromDataSourceError,
 )
 from redash.models.types import (
+    Configuration,
     EncryptedConfiguration,
     JSONText,
     MutableDict,
@@ -229,7 +231,7 @@ class DataSource(BelongsToOrgMixin, db.Model):
 
     def _sort_schema(self, schema):
         return [
-            {"name": i["name"], "columns": sorted(i["columns"], key=lambda x: x["name"] if isinstance(x, dict) else x)}
+            {**i, "columns": sorted(i["columns"], key=lambda x: x["name"] if isinstance(x, dict) else x)}
             for i in sorted(schema, key=lambda x: x["name"])
         ]
 
@@ -388,6 +390,10 @@ class QueryResult(db.Model, BelongsToOrgMixin):
 
 
 def should_schedule_next(previous_iteration, now, interval, time=None, day_of_week=None, failures=0):
+    # if previous_iteration is None, it means the query has never been run before
+    # so we should schedule it immediately
+    if previous_iteration is None:
+        return True
     # if time exists then interval > 23 hours (82800s)
     # if day_of_week exists then interval > 6 days (518400s)
     if time is None:
@@ -561,7 +567,7 @@ class Query(ChangeTrackingMixin, TimestampMixin, BelongsToOrgMixin, db.Model):
             db.session.query(tag_column, usage_count)
             .group_by(tag_column)
             .filter(Query.id.in_(queries.options(load_only("id"))))
-            .order_by(usage_count.desc())
+            .order_by(tag_column)
         )
         return query
 
@@ -603,6 +609,11 @@ class Query(ChangeTrackingMixin, TimestampMixin, BelongsToOrgMixin, db.Model):
                 if query.schedule.get("disabled"):
                     continue
 
+                # Skip queries that have None for all schedule values. It's unclear whether this
+                # something that can happen in practice, but we have a test case for it.
+                if all(value is None for value in query.schedule.values()):
+                    continue
+
                 if query.schedule["until"]:
                     schedule_until = pytz.utc.localize(datetime.datetime.strptime(query.schedule["until"], "%Y-%m-%d"))
 
@@ -614,7 +625,7 @@ class Query(ChangeTrackingMixin, TimestampMixin, BelongsToOrgMixin, db.Model):
                 )
 
                 if should_schedule_next(
-                    retrieved_at or now,
+                    retrieved_at,
                     now,
                     query.schedule["interval"],
                     query.schedule["time"],
@@ -637,6 +648,43 @@ class Query(ChangeTrackingMixin, TimestampMixin, BelongsToOrgMixin, db.Model):
         return list(outdated_queries.values())
 
     @classmethod
+    def _do_multi_byte_search(cls, all_queries, term, limit=None):
+        # term examples:
+        #    - word
+        #    - name:word
+        #    - query:word
+        #    - "multiple words"
+        #    - name:"multiple words"
+        #    - word1 word2 word3
+        #    - word1 "multiple word" query:"select foo"
+        tokens = re.findall(r'(?:([^:\s]+):)?(?:"([^"]+)"|(\S+))', term)
+        conditions = []
+        for token in tokens:
+            key = None
+            if token[0]:
+                key = token[0]
+
+            if token[1]:
+                value = token[1]
+            else:
+                value = token[2]
+
+            pattern = f"%{value}%"
+
+            if key == "id" and value.isdigit():
+                conditions.append(cls.id.equal(int(value)))
+            elif key == "name":
+                conditions.append(cls.name.ilike(pattern))
+            elif key == "query":
+                conditions.append(cls.query_text.ilike(pattern))
+            elif key == "description":
+                conditions.append(cls.description.ilike(pattern))
+            else:
+                conditions.append(or_(cls.name.ilike(pattern), cls.description.ilike(pattern)))
+
+        return all_queries.filter(and_(*conditions)).order_by(Query.id).limit(limit)
+
+    @classmethod
     def search(
         cls,
         term,
@@ -656,12 +704,7 @@ class Query(ChangeTrackingMixin, TimestampMixin, BelongsToOrgMixin, db.Model):
 
         if multi_byte_search:
             # Since tsvector doesn't work well with CJK languages, use `ilike` too
-            pattern = "%{}%".format(term)
-            return (
-                all_queries.filter(or_(cls.name.ilike(pattern), cls.description.ilike(pattern)))
-                .order_by(Query.id)
-                .limit(limit)
-            )
+            return cls._do_multi_byte_search(all_queries, term, limit)
 
         # sort the result using the weight as defined in the search vector column
         return all_queries.search(term, sort=True).limit(limit)
@@ -670,13 +713,7 @@ class Query(ChangeTrackingMixin, TimestampMixin, BelongsToOrgMixin, db.Model):
     def search_by_user(cls, term, user, limit=None, multi_byte_search=False):
         if multi_byte_search:
             # Since tsvector doesn't work well with CJK languages, use `ilike` too
-            pattern = "%{}%".format(term)
-            return (
-                cls.by_user(user)
-                .filter(or_(cls.name.ilike(pattern), cls.description.ilike(pattern)))
-                .order_by(Query.id)
-                .limit(limit)
-            )
+            return cls._do_multi_byte_search(cls.by_user(user), term, limit)
 
         return cls.by_user(user).search(term, sort=True).limit(limit)
 
@@ -717,6 +754,23 @@ class Query(ChangeTrackingMixin, TimestampMixin, BelongsToOrgMixin, db.Model):
                    WHERE queries.id in :ids"""
 
         return db.session.execute(query, {"ids": tuple(query_ids)}).fetchall()
+
+    def update_latest_result_by_query_hash(self):
+        query_hash = self.query_hash
+        data_source_id = self.data_source_id
+        query_result = (
+            QueryResult.query.options(load_only("id"))
+            .filter(
+                QueryResult.query_hash == query_hash,
+                QueryResult.data_source_id == data_source_id,
+            )
+            .order_by(QueryResult.retrieved_at.desc())
+            .first()
+        )
+        if query_result:
+            latest_query_data_id = query_result.id
+            self.latest_query_data_id = latest_query_data_id
+            db.session.add(self)
 
     @classmethod
     def update_latest_result(cls, query_result):
@@ -910,6 +964,7 @@ def next_state(op, value, threshold):
         # boolean value is Python specific and most likely will be confusing to
         # users.
         value = str(value).lower()
+        value_is_number = False
     else:
         try:
             value = float(value)
@@ -927,6 +982,8 @@ def next_state(op, value, threshold):
 
     if op(value, threshold):
         new_state = Alert.TRIGGERED_STATE
+    elif not value_is_number and op not in [OPERATORS.get("!="), OPERATORS.get("=="), OPERATORS.get("equals")]:
+        new_state = Alert.UNKNOWN_STATE
     else:
         new_state = Alert.OK_STATE
 
@@ -938,6 +995,7 @@ class Alert(TimestampMixin, BelongsToOrgMixin, db.Model):
     UNKNOWN_STATE = "unknown"
     OK_STATE = "ok"
     TRIGGERED_STATE = "triggered"
+    TEST_STATE = "test"
 
     id = primary_key("Alert")
     name = Column(db.String(255))
@@ -967,17 +1025,38 @@ class Alert(TimestampMixin, BelongsToOrgMixin, db.Model):
         return super(Alert, cls).get_by_id_and_org(object_id, org, Query)
 
     def evaluate(self):
-        data = self.query_rel.latest_query_data.data
+        data = self.query_rel.latest_query_data.data if self.query_rel.latest_query_data else None
+        new_state = self.UNKNOWN_STATE
 
-        if data["rows"] and self.options["column"] in data["rows"][0]:
+        if data and data["rows"] and self.options["column"] in data["rows"][0]:
             op = OPERATORS.get(self.options["op"], lambda v, t: False)
 
-            value = data["rows"][0][self.options["column"]]
+            if "selector" not in self.options:
+                selector = "first"
+            else:
+                selector = self.options["selector"]
+
+            try:
+                if selector == "max":
+                    max_val = float("-inf")
+                    for i in range(len(data["rows"])):
+                        max_val = max(max_val, float(data["rows"][i][self.options["column"]]))
+                    value = max_val
+                elif selector == "min":
+                    min_val = float("inf")
+                    for i in range(len(data["rows"])):
+                        min_val = min(min_val, float(data["rows"][i][self.options["column"]]))
+                    value = min_val
+                else:
+                    value = data["rows"][0][self.options["column"]]
+
+            except ValueError:
+                return self.UNKNOWN_STATE
+
             threshold = self.options["value"]
 
-            new_state = next_state(op, value, threshold)
-        else:
-            new_state = self.UNKNOWN_STATE
+            if value is not None:
+                new_state = next_state(op, value, threshold)
 
         return new_state
 
@@ -1000,11 +1079,11 @@ class Alert(TimestampMixin, BelongsToOrgMixin, db.Model):
         result_table = []  # A two-dimensional array which can rendered as a table in Mustache
         for row in data["rows"]:
             result_table.append([row[col["name"]] for col in data["columns"]])
-
         context = {
             "ALERT_NAME": self.name,
             "ALERT_URL": "{host}/alerts/{alert_id}".format(host=host, alert_id=self.id),
             "ALERT_STATUS": self.state.upper(),
+            "ALERT_SELECTOR": self.options["selector"],
             "ALERT_CONDITION": self.options["op"],
             "ALERT_THRESHOLD": self.options["value"],
             "QUERY_NAME": self.query_rel.name,
@@ -1115,7 +1194,7 @@ class Dashboard(ChangeTrackingMixin, TimestampMixin, BelongsToOrgMixin, db.Model
             db.session.query(tag_column, usage_count)
             .group_by(tag_column)
             .filter(Dashboard.id.in_(dashboards.options(load_only("id"))))
-            .order_by(usage_count.desc())
+            .order_by(tag_column)
         )
         return query
 
@@ -1123,15 +1202,19 @@ class Dashboard(ChangeTrackingMixin, TimestampMixin, BelongsToOrgMixin, db.Model
     def favorites(cls, user, base_query=None):
         if base_query is None:
             base_query = cls.all(user.org, user.group_ids, user.id)
-        return base_query.join(
-            (
-                Favorite,
-                and_(
-                    Favorite.object_type == "Dashboard",
-                    Favorite.object_id == Dashboard.id,
-                ),
+        return (
+            base_query.distinct(cls.lowercase_name, Dashboard.created_at, Dashboard.slug, Favorite.created_at)
+            .join(
+                (
+                    Favorite,
+                    and_(
+                        Favorite.object_type == "Dashboard",
+                        Favorite.object_id == Dashboard.id,
+                    ),
+                )
             )
-        ).filter(Favorite.user_id == user.id)
+            .filter(Favorite.user_id == user.id)
+        )
 
     @classmethod
     def by_user(cls, user):

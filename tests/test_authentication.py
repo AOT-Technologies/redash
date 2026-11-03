@@ -140,6 +140,13 @@ class TestDynamicTokenAuthentication(BaseTestCase):
         self.assertEqual(["view_query"], user.permissions)
         self.assertNotIn(token, user.name)
 
+    def test_dynamic_token_lists_queries(self):
+        token = generate_token(self.dashboard.id, self.issuer.id)
+        with self.app.test_client() as c:
+            rv = c.get(self.queries_url, query_string={"api_key": token})
+
+        self.assertEqual(200, rv.status_code)
+
     def test_expired_dynamic_token(self):
         token = generate_token(self.dashboard.id, self.issuer.id)
         with patch.object(settings, "DASHBOARD_KEY_SESSION_PERIOD", -1):
@@ -375,6 +382,70 @@ class TestRedirectToUrlAfterLoggingIn(BaseTestCase):
             org=self.factory.org,
         )
         self.assertEqual(response.location, "/queries")
+
+    def test_multiple_slashes_open_redirect(self):
+        response = self.post_request(
+            "/login?next=////evil.com",
+            data={"email": self.user.email, "password": self.password},
+            org=self.factory.org,
+        )
+        self.assertEqual(response.location, "./")
+
+    def test_triple_slash_open_redirect(self):
+        response = self.post_request(
+            "/login?next=///evil.com/phish",
+            data={"email": self.user.email, "password": self.password},
+            org=self.factory.org,
+        )
+        self.assertEqual(response.location, "./")
+
+    def test_multiple_slashes_with_path(self):
+        response = self.post_request(
+            "/login?next=////evil.com/callback?token=secret",
+            data={"email": self.user.email, "password": self.password},
+            org=self.factory.org,
+        )
+        self.assertEqual(response.location, "./")
+
+    def test_file_scheme_open_redirect(self):
+        response = self.post_request(
+            "/login?next=file:https://evil.com/",
+            data={"email": self.user.email, "password": self.password},
+            org=self.factory.org,
+        )
+        self.assertEqual(response.location, "./")
+
+    def test_javascript_scheme_rejected(self):
+        response = self.post_request(
+            "/login?next=javascript:alert(1)",
+            data={"email": self.user.email, "password": self.password},
+            org=self.factory.org,
+        )
+        self.assertEqual(response.location, "./")
+
+    def test_http_scheme_without_netloc_rejected(self):
+        response = self.post_request(
+            "/login?next=http:///evil.com",
+            data={"email": self.user.email, "password": self.password},
+            org=self.factory.org,
+        )
+        self.assertEqual(response.location, "./")
+
+    def test_slash_backslash_redirect_rejected(self):
+        response = self.post_request(
+            "/login?next=/%5Cevil.com",
+            data={"email": self.user.email, "password": self.password},
+            org=self.factory.org,
+        )
+        self.assertEqual(response.location, "./")
+
+    def test_data_scheme_rejected(self):
+        response = self.post_request(
+            "/login?next=data:text/html,<script>alert(1)</script>",
+            data={"email": self.user.email, "password": self.password},
+            org=self.factory.org,
+        )
+        self.assertEqual(response.location, "./")
 
 
 class TestRemoteUserAuth(BaseTestCase):

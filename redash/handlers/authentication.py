@@ -29,6 +29,7 @@ def get_google_auth_url(next_path):
 
 
 def render_token_login_page(template, org_slug, token, invite):
+    error_message = None
     try:
         user_id = validate_token(token)
         org = current_org._get_current_object()
@@ -40,19 +41,19 @@ def render_token_login_page(template, org_slug, token, invite):
             user_id,
             org_slug,
         )
+        error_message = "Your invite link is invalid. Bad user id in token. Please ask for a new one."
+    except SignatureExpired:
+        logger.exception("Token signature has expired. Token: %s, org=%s", token, org_slug)
+        error_message = "Your invite link has expired. Please ask for a new one."
+    except BadSignature:
+        logger.exception("Bad signature for the token: %s, org=%s", token, org_slug)
+        error_message = "Your invite link is invalid. Bad signature. Please double-check the token."
+
+    if error_message:
         return (
             render_template(
                 "error.html",
-                error_message="Invalid invite link. Please ask for a new one.",
-            ),
-            400,
-        )
-    except (SignatureExpired, BadSignature):
-        logger.exception("Failed to verify invite token: %s, org=%s", token, org_slug)
-        return (
-            render_template(
-                "error.html",
-                error_message="Your invite link has expired. Please ask for a new one.",
+                error_message=error_message,
             ),
             400,
         )
@@ -251,6 +252,14 @@ def number_format_config():
     return {
         "integerFormat": current_org.get_setting("integer_format"),
         "floatFormat": current_org.get_setting("float_format"),
+        "thousandsSeparator": current_org.get_setting("thousands_separator"),
+        "decimalSeparator": current_org.get_setting("decimal_separator"),
+    }
+
+
+def null_value_config():
+    return {
+        "nullValue": current_org.get_setting("null_value"),
     }
 
 
@@ -271,6 +280,7 @@ def client_config():
         "showPermissionsControl": current_org.get_setting("feature_show_permissions_control"),
         "hidePlotlyModeBar": current_org.get_setting("hide_plotly_mode_bar"),
         "disablePublicUrls": current_org.get_setting("disable_public_urls"),
+        "multiByteSearchEnabled": current_org.get_setting("multi_byte_search_enabled"),
         "allowCustomJSVisualizations": settings.FEATURE_ALLOW_CUSTOM_JS_VISUALIZATIONS,
         "autoPublishNamedQueries": settings.FEATURE_AUTO_PUBLISH_NAMED_QUERIES,
         "extendedAlertOptions": settings.FEATURE_EXTENDED_ALERT_OPTIONS,
@@ -288,6 +298,7 @@ def client_config():
     client_config.update({"basePath": base_href()})
     client_config.update(date_time_format_config())
     client_config.update(number_format_config())
+    client_config.update(null_value_config())
 
     return client_config
 

@@ -5,3 +5,5 @@ bin/* text eol=lf
 .ci/* text eol=lf
 manage.py text eol=lf
 *.sh text eol=lf
+# The Dockerfile runs shell scripts from RUN <<EOF heredocs, which break on CRLF.
+Dockerfile text eol=lf

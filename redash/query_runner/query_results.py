@@ -1,3 +1,4 @@
+import datetime
 import decimal
 import hashlib
 import logging
@@ -6,7 +7,8 @@ import sqlite3
 from urllib.parse import parse_qs
 
 from redash import models
-from redash.permissions import has_access, view_only
+from redash.models.parameterized_query import ParameterizedQuery
+from redash.permissions import has_access, not_view_only, view_only
 from redash.query_runner import (
     TYPE_STRING,
     BaseQueryRunner,
@@ -55,13 +57,6 @@ def _load_query(user, query_id):
     return query
 
 
-def replace_query_parameters(query_text, params):
-    qs = parse_qs(params)
-    for key, value in qs.items():
-        query_text = query_text.replace("{{{{{my_key}}}}}".format(my_key=key), value[0])
-    return query_text
-
-
 def get_query_results(user, query_id, bring_from_cache, params=None):
     query = _load_query(user, query_id)
     if bring_from_cache:
@@ -72,7 +67,18 @@ def get_query_results(user, query_id, bring_from_cache, params=None):
     else:
         query_text = query.query_text
         if params is not None:
-            query_text = replace_query_parameters(query_text, params)
+            parameterized = ParameterizedQuery(query_text, query.parameters, query.org)
+
+            if not parameterized.is_safe:
+                if not has_access(query.data_source, user, not_view_only):
+                    raise PermissionError(
+                        "You do not have full access to the data source of query id {}.".format(query.id)
+                    )
+
+            qs = parse_qs(params)
+            parameters = {key: value[0] for key, value in qs.items()}
+            parameterized.apply(parameters)
+            query_text = parameterized.query
 
         results, error = query.data_source.query_runner.run_query(query_text, user)
         if error:
@@ -89,7 +95,9 @@ def create_tables_from_query_ids(user, connection, query_ids, query_params, cach
 
     for query in set(query_params):
         results = get_query_results(user, query[0], False, query[1])
-        table_hash = hashlib.md5("query_{query}_{hash}".format(query=query[0], hash=query[1]).encode()).hexdigest()
+        table_hash = hashlib.md5(
+            "query_{query}_{hash}".format(query=query[0], hash=query[1]).encode(), usedforsecurity=False
+        ).hexdigest()
         table_name = "query_{query_id}_{param_hash}".format(query_id=query[0], param_hash=table_hash)
         create_table(connection, table_name, results)
 
@@ -108,6 +116,8 @@ def flatten(value):
         return json_dumps(value)
     elif isinstance(value, decimal.Decimal):
         return float(value)
+    elif isinstance(value, datetime.timedelta):
+        return str(value)
     else:
         return value
 
@@ -139,7 +149,9 @@ def create_table(connection, table_name, query_results):
 
 def prepare_parameterized_query(query, query_params):
     for params in query_params:
-        table_hash = hashlib.md5("query_{query}_{hash}".format(query=params[0], hash=params[1]).encode()).hexdigest()
+        table_hash = hashlib.md5(
+            "query_{query}_{hash}".format(query=params[0], hash=params[1]).encode(), usedforsecurity=False
+        ).hexdigest()
         key = "param_query_{query_id}_{{{param_string}}}".format(query_id=params[0], param_string=params[1])
         value = "query_{query_id}_{param_hash}".format(query_id=params[0], param_hash=table_hash)
         query = query.replace(key, value)
