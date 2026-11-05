@@ -1,5 +1,7 @@
 import signal
+import sys
 import time
+from collections import deque
 
 import redis
 from rq import get_current_job
@@ -55,7 +57,7 @@ def enqueue_query(query, data_source, user_id, is_api_key=False, scheduled_query
                     if job_complete:
                         message = "job found is complete (%s)" % status
                     elif job_cancelled:
-                        message = "job found has ben cancelled"
+                        message = "job found has been cancelled"
                 except NoSuchJobError:
                     message = "job found has expired"
                     job_exists = False
@@ -138,11 +140,35 @@ def _resolve_user(user_id, is_api_key, query_id):
             else:
                 q = models.Query.by_api_key(api_key)
 
-            return models.ApiUser(api_key, q.org, q.groups)
+            return models.ApiUser(api_key, q.org, q.groups, name="ApiKey: Query {}".format(q.id))
         else:
             return models.User.get_by_id(user_id)
     else:
         return None
+
+
+def _get_size_iterative(dict_obj):
+    """Iteratively finds size of objects in bytes"""
+    seen = set()
+    size = 0
+    objects = deque([dict_obj])
+
+    while objects:
+        current = objects.popleft()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        size += sys.getsizeof(current)
+
+        if isinstance(current, dict):
+            objects.extend(current.keys())
+            objects.extend(current.values())
+        elif hasattr(current, "__dict__"):
+            objects.append(current.__dict__)
+        elif hasattr(current, "__iter__") and not isinstance(current, (str, bytes, bytearray)):
+            objects.extend(current)
+
+    return size
 
 
 class QueryExecutor:
@@ -195,7 +221,7 @@ class QueryExecutor:
             "job=execute_query query_hash=%s ds_id=%d data_length=%s error=[%s]",
             self.query_hash,
             self.data_source_id,
-            data and len(data),
+            data and _get_size_iterative(data),
             error,
         )
 
@@ -237,6 +263,10 @@ class QueryExecutor:
             return result
 
     def _annotate_query(self, query_runner):
+        # Fill in missing identity for older jobs; keep metadata supplied by newer producers.
+        # ApiUser.id contains the secret key; get_actual_user() returns its safe label.
+        if "user_id" not in self.metadata and self.user is not None:
+            self.metadata["user_id"] = self.user.get_actual_user() if self.user.is_api_user() else self.user.id
         self.metadata["Job ID"] = self.job.id
         self.metadata["Query Hash"] = self.query_hash
         self.metadata["Scheduled"] = self.is_scheduled_query
@@ -246,7 +276,7 @@ class QueryExecutor:
     def _log_progress(self, state):
         logger.info(
             "job=execute_query state=%s query_hash=%s type=%s ds_id=%d "
-            "job_id=%s queue=%s query_id=%s username=%s",  # fmt: skip
+            "job_id=%s queue=%s query_id=%s user_id=%s",  # fmt: skip
             state,
             self.query_hash,
             self.data_source.type,
@@ -254,7 +284,7 @@ class QueryExecutor:
             self.job.id,
             self.metadata.get("Queue", "unknown"),
             self.metadata.get("query_id", "unknown"),
-            self.metadata.get("Username", "unknown"),
+            self.metadata.get("user_id", "unknown"),
         )
 
     def _load_data_source(self):

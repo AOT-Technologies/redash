@@ -25,6 +25,7 @@ def init_app(app):
     app.config["WTF_CSRF_CHECK_DEFAULT"] = False
     app.config["WTF_CSRF_SSL_STRICT"] = False
     app.config["WTF_CSRF_TIME_LIMIT"] = settings.CSRF_TIME_LIMIT
+    app.config["SESSION_COOKIE_NAME"] = settings.SESSION_COOKIE_NAME
 
     @app.after_request
     def inject_csrf_token(response):
@@ -40,9 +41,7 @@ def init_app(app):
                 return
 
             view = app.view_functions.get(request.endpoint)
-            dest = f"{view.__module__}.{view.__name__}"
-
-            if dest in csrf._exempt_views:
+            if view is not None and f"{view.__module__}.{view.__name__}" in csrf._exempt_views:
                 return
             # END workaround
 

@@ -3,8 +3,9 @@ import datetime
 from unittest import TestCase
 
 from dateutil.parser import parse as date_parse
+from mock import patch
 
-from redash import models
+from redash import models, settings
 from redash.models import db
 from redash.utils import gen_query_hash, utcnow
 from tests import BaseTestCase
@@ -215,6 +216,20 @@ class QueryOutdatedQueriesTest(BaseTestCase):
         self.fake_previous_execution(query2, minutes=10)
 
         self.assertEqual(list(models.Query.outdated_queries()), [query2])
+
+    def test_enqueues_scheduled_query_without_latest_query_data(self):
+        """
+        Queries with a schedule but no latest_query_data will still be reported by Query.outdated_queries()
+        """
+        query = self.factory.create_query(
+            schedule=self.schedule(interval="60"),
+            data_source=self.factory.create_data_source(),
+        )
+
+        outdated_queries = models.Query.outdated_queries()
+        self.assertEqual(query.latest_query_data, None)
+        self.assertEqual(len(outdated_queries), 1)
+        self.assertIn(query, outdated_queries)
 
     def test_enqueues_query_with_correct_data_source(self):
         """
@@ -592,8 +607,14 @@ def _set_up_dashboard_test(d):
 
 
 class TestDashboardAll(BaseTestCase):
+    """Single-org mode: dashboards are filtered by data source group access or creator."""
+
     def setUp(self):
         super(TestDashboardAll, self).setUp()
+        # The test suite runs with REDASH_MULTI_ORG=true; the group filter only applies in single-org mode.
+        patcher = patch.object(settings, "MULTI_ORG", False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         _set_up_dashboard_test(self)
 
     def test_requires_group_or_user_id(self):
@@ -666,3 +687,33 @@ class TestDashboardAll(BaseTestCase):
             list(models.Dashboard.all(self.factory.user.org, self.factory.user.group_ids, None)),
         )
         self.assertNotIn(w1.dashboard, list(models.Dashboard.all(user.org, user.group_ids, user.id)))
+
+
+class TestDashboardAllMultiOrg(BaseTestCase):
+    """Multi-org mode: access is scoped by organization only, not by data source groups."""
+
+    def setUp(self):
+        super(TestDashboardAllMultiOrg, self).setUp()
+        patcher = patch.object(settings, "MULTI_ORG", True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        _set_up_dashboard_test(self)
+
+    def test_returns_all_org_dashboards_regardless_of_groups(self):
+        dashboards = list(models.Dashboard.all(self.u1.org, [0], None))
+        self.assertIn(self.w1.dashboard, dashboards)
+        self.assertIn(self.w5.dashboard, dashboards)
+
+    def test_does_not_return_dashboards_of_other_orgs(self):
+        other_org = self.factory.create_org()
+        other_user = self.factory.create_user(org=other_org)
+        db.session.flush()
+        dashboards = list(models.Dashboard.all(other_org, other_user.group_ids, other_user.id))
+        self.assertNotIn(self.w1.dashboard, dashboards)
+        self.assertNotIn(self.w2.dashboard, dashboards)
+
+    def test_hides_other_users_drafts(self):
+        draft = self.factory.create_dashboard(is_draft=True)
+        db.session.flush()
+        self.assertNotIn(draft, list(models.Dashboard.all(draft.user.org, draft.user.group_ids, None)))
+        self.assertIn(draft, list(models.Dashboard.all(draft.user.org, draft.user.group_ids, draft.user.id)))

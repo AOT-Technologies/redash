@@ -17,6 +17,7 @@ client/dist
 _build
 .vscode
 .env
+.tool-versions
 
 dump.rdb
 
@@ -27,5 +28,3 @@ npm-debug.log
 
 client/cypress/screenshots
 client/cypress/videos
-/yarn-error.log
-.yarn

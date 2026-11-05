@@ -1,26 +1,13 @@
-from flask import request, abort
-
-from .authentication import current_org
-
+from flask import abort, request
 from flask_login import current_user, login_required
 
-from redash import models
-
+from redash import models, settings
+from redash.authentication import get_user_from_dashboard_token
 from redash.handlers import routes
-
 from redash.handlers.base import get_object, org_scoped_rule, record_event
-
-from redash.handlers.base import (
-    get_object_or_404,
-    org_scoped_rule,
-    record_event,
-)
 from redash.handlers.static import render_index
 from redash.security import csp_allows_embeding
-from redash.worker import get_job_logger
 from redash.utils.dynamic_key import decode_token
-
-logger = get_job_logger(__name__)
 
 from .authentication import current_org
 
@@ -51,28 +38,26 @@ def embed(query_id, visualization_id, org_slug=None):
 @login_required
 @csp_allows_embeding
 def public_dashboard(token, org_slug=None):
-    logger.info(f"Inside >>> public_dashboard : {token}")
-    logger.info(f"current_user.is_api_user() : {current_user.is_api_user()}")
+    dashboard = None
     if current_user.is_api_user():
+        # API calls from an open page accept a dynamic token for DASHBOARD_KEY_SESSION_PERIOD,
+        # but the page itself can only be opened with a token younger than DASHBOARD_KEY_EXPIRY_PERIOD.
+        if current_user.is_dynamic_token and not decode_token(
+            current_user.id, max_age=settings.DASHBOARD_KEY_EXPIRY_PERIOD
+        ):
+            abort(404)
         dashboard = current_user.object
-
     else:
         api_key = get_object(models.ApiKey.get_by_api_key, token)
-        logger.info(f" api_key : {api_key}")
         if api_key:
             dashboard = api_key.object
-            logger.info('dashboard %s', dashboard)
         else:
-            # Here if the object is not found using the api_key try to decode the token using salt and see if it's valid
-            decoded_token = decode_token(token)
-            logger.info(f" decoded_token : {decoded_token}")
-            if decode_token:
-                dashboard_id = decoded_token.get('id')
-                logger.info('Extracted dashboard id from the token : %s', dashboard_id)
-                dashboard = models.Dashboard.get_by_id(dashboard_id)
-                logger.info('Found dashboard : %s', dashboard)
+            token_user = get_user_from_dashboard_token(
+                token, current_org._get_current_object(), max_age=settings.DASHBOARD_KEY_EXPIRY_PERIOD
+            )
+            if token_user:
+                dashboard = token_user.object
 
-    logger.info('dashboard >> %s', dashboard)
     if not dashboard:
         abort(404)
 

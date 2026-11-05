@@ -17,6 +17,7 @@ from redash.authentication import (
     get_login_url,
     hmac_load_user_from_request,
     jwt_auth,
+    load_user,
     org_settings,
     sign,
 )
@@ -24,6 +25,7 @@ from redash.authentication.google_oauth import (
     create_and_login_user,
     verify_profile,
 )
+from redash.utils.dynamic_key import generate_token
 from tests import BaseTestCase
 
 
@@ -93,6 +95,93 @@ class TestApiKeyAuthentication(BaseTestCase):
                 headers={"Authorization": "Key {}".format(other_user.api_key)},
             )
             self.assertEqual(404, rv.status_code)
+
+    def test_api_key_header_with_other_scheme(self):
+        with self.app.test_client() as c:
+            c.get(self.query_url, headers={"Authorization": "Bearer oops"})
+            self.assertIsNone(api_key_load_user_from_request(request))
+
+    def test_inactive_dashboard_api_key(self):
+        api_key = self.factory.create_api_key(object=self.factory.create_dashboard(), active=False)
+        models.db.session.flush()
+        with self.app.test_client() as c:
+            c.get(self.queries_url, query_string={"api_key": api_key.api_key})
+            self.assertIsNone(api_key_load_user_from_request(request))
+
+    def test_session_user_with_wrong_api_key(self):
+        user = self.factory.create_user()
+        models.db.session.flush()
+        with self.app.test_client() as c:
+            c.get(self.queries_url, headers={"Authorization": "Key oops"})
+            self.assertEqual(user.id, load_user(user.get_id()).id)
+
+
+class TestDynamicTokenAuthentication(BaseTestCase):
+    def setUp(self):
+        super(TestDynamicTokenAuthentication, self).setUp()
+        self.issuer = self.factory.create_admin()
+        self.dashboard = self.factory.create_dashboard(user=self.issuer)
+        models.db.session.flush()
+        self.queries_url = "/{}/api/queries".format(self.factory.org.slug)
+
+    def load_user_with_key(self, api_key):
+        with self.app.test_client() as c:
+            c.get(self.queries_url, query_string={"api_key": api_key})
+            return api_key_load_user_from_request(request)
+
+    def test_dynamic_token(self):
+        token = generate_token(self.dashboard.id, self.issuer.id)
+        user = self.load_user_with_key(token)
+
+        self.assertIsInstance(user, models.ApiUser)
+        self.assertTrue(user.is_dynamic_token)
+        self.assertEqual(self.dashboard.id, user.object.id)
+        self.assertEqual(self.factory.org.id, user.org_id)
+        self.assertEqual(["view_query"], user.permissions)
+        self.assertNotIn(token, user.name)
+
+    def test_dynamic_token_lists_queries(self):
+        token = generate_token(self.dashboard.id, self.issuer.id)
+        with self.app.test_client() as c:
+            rv = c.get(self.queries_url, query_string={"api_key": token})
+
+        self.assertEqual(200, rv.status_code)
+
+    def test_expired_dynamic_token(self):
+        token = generate_token(self.dashboard.id, self.issuer.id)
+        with patch.object(settings, "DASHBOARD_KEY_SESSION_PERIOD", -1):
+            self.assertIsNone(self.load_user_with_key(token))
+
+    def test_dynamic_token_for_dashboard_in_other_org(self):
+        other_org = self.factory.create_org()
+        other_issuer = self.factory.create_admin(org=other_org)
+        other_dashboard = self.factory.create_dashboard(org=other_org, user=other_issuer)
+        models.db.session.flush()
+
+        self.assertIsNone(self.load_user_with_key(generate_token(other_dashboard.id, other_issuer.id)))
+
+    def test_dynamic_token_issued_by_user_in_other_org(self):
+        other_issuer = self.factory.create_admin(org=self.factory.create_org())
+        models.db.session.flush()
+
+        self.assertIsNone(self.load_user_with_key(generate_token(self.dashboard.id, other_issuer.id)))
+
+    def test_dynamic_token_issued_by_disabled_user(self):
+        token = generate_token(self.dashboard.id, self.issuer.id)
+        self.issuer.disable()
+        models.db.session.flush()
+
+        self.assertIsNone(self.load_user_with_key(token))
+
+    def test_dynamic_token_for_archived_dashboard(self):
+        token = generate_token(self.dashboard.id, self.issuer.id)
+        self.dashboard.is_archived = True
+        models.db.session.flush()
+
+        self.assertIsNone(self.load_user_with_key(token))
+
+    def test_garbage_token(self):
+        self.assertIsNone(self.load_user_with_key("garbage"))
 
 
 class TestHMACAuthentication(BaseTestCase):
@@ -294,6 +383,70 @@ class TestRedirectToUrlAfterLoggingIn(BaseTestCase):
         )
         self.assertEqual(response.location, "/queries")
 
+    def test_multiple_slashes_open_redirect(self):
+        response = self.post_request(
+            "/login?next=////evil.com",
+            data={"email": self.user.email, "password": self.password},
+            org=self.factory.org,
+        )
+        self.assertEqual(response.location, "./")
+
+    def test_triple_slash_open_redirect(self):
+        response = self.post_request(
+            "/login?next=///evil.com/phish",
+            data={"email": self.user.email, "password": self.password},
+            org=self.factory.org,
+        )
+        self.assertEqual(response.location, "./")
+
+    def test_multiple_slashes_with_path(self):
+        response = self.post_request(
+            "/login?next=////evil.com/callback?token=secret",
+            data={"email": self.user.email, "password": self.password},
+            org=self.factory.org,
+        )
+        self.assertEqual(response.location, "./")
+
+    def test_file_scheme_open_redirect(self):
+        response = self.post_request(
+            "/login?next=file:https://evil.com/",
+            data={"email": self.user.email, "password": self.password},
+            org=self.factory.org,
+        )
+        self.assertEqual(response.location, "./")
+
+    def test_javascript_scheme_rejected(self):
+        response = self.post_request(
+            "/login?next=javascript:alert(1)",
+            data={"email": self.user.email, "password": self.password},
+            org=self.factory.org,
+        )
+        self.assertEqual(response.location, "./")
+
+    def test_http_scheme_without_netloc_rejected(self):
+        response = self.post_request(
+            "/login?next=http:///evil.com",
+            data={"email": self.user.email, "password": self.password},
+            org=self.factory.org,
+        )
+        self.assertEqual(response.location, "./")
+
+    def test_slash_backslash_redirect_rejected(self):
+        response = self.post_request(
+            "/login?next=/%5Cevil.com",
+            data={"email": self.user.email, "password": self.password},
+            org=self.factory.org,
+        )
+        self.assertEqual(response.location, "./")
+
+    def test_data_scheme_rejected(self):
+        response = self.post_request(
+            "/login?next=data:text/html,<script>alert(1)</script>",
+            data={"email": self.user.email, "password": self.password},
+            org=self.factory.org,
+        )
+        self.assertEqual(response.location, "./")
+
 
 class TestRemoteUserAuth(BaseTestCase):
     DEFAULT_SETTING_OVERRIDES = {"REDASH_REMOTE_USER_LOGIN_ENABLED": "true"}
@@ -386,6 +539,50 @@ class TestRemoteUserAuth(BaseTestCase):
         )
 
         self.assert_correct_user_attributes(self.get_test_user())
+
+
+class TestSAMLAuthentication(BaseTestCase):
+    def setUp(self):
+        super(TestSAMLAuthentication, self).setUp()
+        self.factory.org.set_setting("auth_saml_enabled", True)
+        models.db.session.commit()
+
+    def saml_login(self, ava, email="test@example.com"):
+        authn_response = Mock(ava=ava)
+        authn_response.get_subject.return_value.text = email
+
+        with patch("redash.authentication.saml_auth.get_saml_client") as get_saml_client_mock:
+            get_saml_client_mock.return_value.parse_authn_request_response.return_value = authn_response
+            return self.post_request("/saml/callback", data={"SAMLResponse": "response"}, org=self.factory.org)
+
+    def get_test_user(self, email="test@example.com"):
+        models.db.session.expire_all()
+        return models.User.get_by_email_and_org(email, self.factory.org)
+
+    def test_saml_login_with_first_and_last_name_attributes(self):
+        response = self.saml_login({"FirstName": ["Ada"], "LastName": ["Lovelace"]})
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.get_test_user().name, "Ada Lovelace")
+
+    def test_saml_login_with_x500_oid_attributes(self):
+        # Keycloak's X500 mappers with the default Basic name format.
+        response = self.saml_login({"urn:oid:2.5.4.42": ["Ada"], "urn:oid:2.5.4.4": ["Lovelace"]})
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.get_test_user().name, "Ada Lovelace")
+
+    def test_saml_login_with_given_name_and_surname_attributes(self):
+        response = self.saml_login({"givenName": ["Ada"], "sn": ["Lovelace"]})
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.get_test_user().name, "Ada Lovelace")
+
+    def test_saml_login_without_name_attributes_uses_email(self):
+        response = self.saml_login({})
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.get_test_user().name, "test@example.com")
 
 
 class TestUserForgotPassword(BaseTestCase):

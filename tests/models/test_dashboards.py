@@ -1,3 +1,6 @@
+from mock import patch
+
+from redash import settings
 from redash.models import Dashboard, db
 from tests import BaseTestCase
 
@@ -51,6 +54,7 @@ class TestDashboardsByUser(BaseTestCase):
         self.assertTrue(d in dashboards)
         self.assertFalse(d2 in dashboards)
 
+    @patch.object(settings, "MULTI_ORG", False)
     def test_returns_correct_number_of_dashboards(self):
         # Solving https://github.com/getredash/redash/issues/5466
 

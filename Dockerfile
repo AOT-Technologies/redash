@@ -1,7 +1,7 @@
 # Use multi-architecture base images
-FROM --platform=$BUILDPLATFORM node:18-bookworm as frontend-builder
+FROM --platform=$BUILDPLATFORM node:24-bookworm AS frontend-builder
 
-RUN npm install --global --force yarn@1.22.19
+RUN npm install --global pnpm@10.30.3
 
 # Controls whether to build the frontend assets
 ARG skip_frontend_build
@@ -13,7 +13,7 @@ RUN useradd -m -d /frontend redash
 USER redash
 
 WORKDIR /frontend
-COPY --chown=redash package.json yarn.lock .yarnrc /frontend/
+COPY --chown=redash package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc /frontend/
 COPY --chown=redash viz-lib /frontend/viz-lib
 COPY --chown=redash scripts /frontend/scripts
 
@@ -21,15 +21,28 @@ COPY --chown=redash scripts /frontend/scripts
 ARG code_coverage
 ENV BABEL_ENV=${code_coverage:+test}
 
-RUN yarn --frozen-lockfile --network-concurrency 1
+# Use BuildKit cache mount for pnpm store to speed rebuilds
+RUN --mount=type=cache,id=pnpm-store,target=/frontend/.cache/pnpm,uid=1001,gid=1001 \
+  pnpm config set store-dir /frontend/.cache/pnpm && \
+  if [ "x$skip_frontend_build" = "x" ] ; then pnpm install --frozen-lockfile; fi
 
 COPY --chown=redash client /frontend/client
 COPY --chown=redash webpack.config.js /frontend/
-# Use `yarn run` to ensure the locally installed webpack is used
-RUN yarn clean && yarn build:viz && NODE_OPTIONS=--openssl-legacy-provider NODE_ENV=production yarn run webpack && mkdir -p /frontend/client/dist && touch /frontend/client/dist/multi_org.html && touch /frontend/client/dist/index.html
 
-# Use multi-architecture base images
-FROM --platform=$BUILDPLATFORM python:3.8-slim-bookworm
+# Use the same cache mount for the build step
+RUN --mount=type=cache,id=pnpm-store,target=/frontend/.cache/pnpm,uid=1001,gid=1001 <<EOF
+  if [ "x$skip_frontend_build" = "x" ]; then
+    pnpm run build
+  else
+    mkdir -p /frontend/client/dist
+    touch /frontend/client/dist/multi_org.html
+    touch /frontend/client/dist/index.html
+  fi
+EOF
+
+# The runtime image is built for each target platform (unlike the frontend builder above,
+# whose output is platform independent), so arm64 images get arm64 Python packages.
+FROM python:3.13-slim-bookworm
 
 EXPOSE 5000
 
@@ -59,6 +72,8 @@ RUN apt-get update && \
   default-libmysqlclient-dev \
   freetds-dev \
   libsasl2-dev \
+  # libev event loop for the Cassandra driver
+  libev-dev \
   unzip \
   libsasl2-modules-gssapi-mit && \
   apt-get clean && \
@@ -66,18 +81,33 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-ENV POETRY_VERSION=1.6.1
-ENV POETRY_HOME=/etc/poetry
-ENV POETRY_VIRTUALENVS_CREATE=false
-RUN curl -sSL https://install.python-poetry.org | python3 -
+# Install uv (pinned) from the official distroless image for a reproducible build.
+COPY --from=ghcr.io/astral-sh/uv:0.11.6 /uv /usr/local/bin/uv
 
-COPY pyproject.toml poetry.lock ./
+# Install into the system environment rather than a project-local virtualenv,
+# so console scripts (gunicorn, supervisord, rq, ...) are on PATH.
+ENV UV_PROJECT_ENVIRONMENT=/usr/local
+ENV UV_COMPILE_BYTECODE=1
+ENV UV_LINK_MODE=copy
 
-ARG POETRY_OPTIONS="--no-root --no-interaction --no-ansi"
-# for LDAP authentication, install with `ldap3` group
+COPY pyproject.toml uv.lock ./
+
+ARG UV_OPTIONS="--frozen --no-install-project --no-default-groups"
+# for LDAP authentication, install with the `ldap3` group
 # disabled by default due to GPL license conflict
 ARG install_groups="main,all_ds,dev"
-RUN /etc/poetry/bin/poetry install --only $install_groups $POETRY_OPTIONS
+# Translate the comma-separated install_groups list into uv flags. "main"
+# refers to the project's base dependencies (always installed); every other
+# entry maps to a uv dependency group.
+RUN --mount=type=cache,target=/root/.cache/uv <<EOF
+  group_flags=""
+  for group in $(echo "$install_groups" | tr ',' ' '); do
+    if [ "$group" != "main" ]; then
+      group_flags="$group_flags --group $group"
+    fi
+  done
+  uv sync $UV_OPTIONS $group_flags
+EOF
 
 COPY --chown=redash . /app
 COPY --from=frontend-builder --chown=redash /frontend/client/dist /app/client/dist

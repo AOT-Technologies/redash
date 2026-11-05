@@ -1,3 +1,5 @@
+import logging
+
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy_utils.models import generic_repr
@@ -8,8 +10,6 @@ from .base import Column, db, primary_key
 from .mixins import TimestampMixin
 from .types import MutableDict
 from .users import Group, User
-
-import logging
 
 logger = logging.getLogger(__name__)
 

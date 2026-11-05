@@ -10,6 +10,11 @@ from tests import BaseTestCase
 class TestQueryToScript(BaseTestCase):
     monkeypatch = MonkeyPatch()
 
+    def tearDown(self):
+        # Undo the patches so they don't leak into later tests (os.path.exists here).
+        self.monkeypatch.undo()
+        super(TestQueryToScript, self).tearDown()
+
     def test_unspecified(self):
         self.assertEqual("/foo/bar/baz.sh", query_to_script_path("*", "/foo/bar/baz.sh"))
 
@@ -22,6 +27,10 @@ class TestQueryToScript(BaseTestCase):
 
 class TestRunScript(BaseTestCase):
     monkeypatch = MonkeyPatch()
+
+    def tearDown(self):
+        self.monkeypatch.undo()
+        super(TestRunScript, self).tearDown()
 
     def test_success(self):
         self.monkeypatch.setattr(subprocess, "check_output", lambda script, shell: "test")

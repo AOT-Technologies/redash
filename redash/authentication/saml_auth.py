@@ -20,6 +20,19 @@ logger = logging.getLogger("saml_auth")
 blueprint = Blueprint("saml_auth", __name__)
 inline_metadata_template = """<?xml version="1.0" encoding="UTF-8"?><md:EntityDescriptor entityID="{{entity_id}}" xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata"><md:IDPSSODescriptor WantAuthnRequestsSigned="false" protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol"><md:KeyDescriptor use="signing"><ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:X509Data><ds:X509Certificate>{{x509_cert}}</ds:X509Certificate></ds:X509Data></ds:KeyInfo></md:KeyDescriptor><md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="{{sso_url}}"/><md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="{{sso_url}}"/></md:IDPSSODescriptor></md:EntityDescriptor>"""
 
+# pysaml2 keys attributes by their SAML Name, not FriendlyName. Keycloak's X500 mappers send
+# the LDAP OIDs, which arrive as-is with the Basic name format or as givenName/sn with URI.
+FIRST_NAME_ATTRIBUTES = ("FirstName", "givenName", "urn:oid:2.5.4.42")
+LAST_NAME_ATTRIBUTES = ("LastName", "sn", "urn:oid:2.5.4.4")
+
+
+def get_attribute_value(ava, attribute_names):
+    for attribute_name in attribute_names:
+        values = ava.get(attribute_name)
+        if values:
+            return values[0]
+    return None
+
 
 def get_saml_client(org):
     """
@@ -125,10 +138,9 @@ def idp_initiated(org_slug=None):
     authn_response.get_identity()
     user_info = authn_response.get_subject()
     email = user_info.text
-    name = "%s %s" % (
-        authn_response.ava["FirstName"][0],
-        authn_response.ava["LastName"][0],
-    )
+    first_name = get_attribute_value(authn_response.ava, FIRST_NAME_ATTRIBUTES)
+    last_name = get_attribute_value(authn_response.ava, LAST_NAME_ATTRIBUTES)
+    name = " ".join(part for part in (first_name, last_name) if part) or email
 
     # This is what as known as "Just In Time (JIT) provisioning".
     # What that means is that, if a user in a SAML assertion

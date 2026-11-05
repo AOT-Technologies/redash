@@ -26,9 +26,6 @@ from redash.serializers import serialize_job
 from redash.tasks.general import get_schema, test_connection
 from redash.utils import filter_none
 from redash.utils.configuration import ConfigurationContainer, ValidationError
-
-from redash.tasks.general import test_connection, get_schema
-from redash.serializers import serialize_job
 from redash.worker import get_job_logger
 
 logger = get_job_logger(__name__)
@@ -141,7 +138,7 @@ class DataSourceListResource(BaseResource):
         require_fields(req, ("options", "name", "type"))
 
         schema = get_configuration_schema_for_query_runner_type(req["type"])
-        logger.info('>> Schema %s', schema)
+        logger.info(">> Schema %s", schema)
         if schema is None:
             abort(400)
 
