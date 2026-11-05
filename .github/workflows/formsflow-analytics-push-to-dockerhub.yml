@@ -3,7 +3,7 @@ name: CD - formsflow-analytics
 on:
   workflow_dispatch:
   push:
-    branches: [ formsflow, formsflow-merge ]
+    branches: [ formsflow-main, formsflow-develop ]
 
 defaults:
   run:
@@ -40,12 +40,12 @@ jobs:
             exit 1
           fi
 
-      # The formsflow branch publishes release images, so it drops the -alpha suffix.
+      # The formsflow-main branch publishes release images, so it drops the -alpha suffix.
       - name: Set version
         id: version
         run: |
           VER=$(cat VERSION)
-          if [ "$GITHUB_REF" = "refs/heads/formsflow" ]; then
+          if [ "$GITHUB_REF" = "refs/heads/formsflow-main" ]; then
             VER=${VER/-alpha/''}
           fi
           echo "version=$VER" >> "$GITHUB_OUTPUT"
@@ -196,13 +196,13 @@ jobs:
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e
 
       # ----------------------------------------------------------
-      # Tag the multi-arch image (latest only on formsflow)
+      # Tag the multi-arch image (latest only on formsflow-main)
       # ----------------------------------------------------------
       - name: Create and push the multi-arch image
         working-directory: ${{ runner.temp }}/digests
         env:
           VERSION: ${{ needs.version.outputs.version }}
-          LATEST: ${{ github.ref == 'refs/heads/formsflow' }}
+          LATEST: ${{ github.ref == 'refs/heads/formsflow-main' }}
         run: |
           set -euo pipefail
 

@@ -5,12 +5,12 @@ on:
 
   push:
     branches:
-      - formsflow
+      - formsflow-main
 
   pull_request:
     branches:
-      - formsflow
-      - formsflow-merge
+      - formsflow-main
+      - formsflow-develop
 
 permissions:
   contents: read
