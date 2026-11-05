@@ -7,7 +7,25 @@
 
 Redash is designed to enable anyone, regardless of the level of technical sophistication, to harness the power of data big and small. SQL users leverage Redash to explore, query, visualize, and share data from any data source. Their work, in turn, enables anybody in their organization to use the data. Every day, millions of users at thousands of organizations around the world use Redash to develop insights and make data-driven decisions.
 
-Redash features:
+## Branching Strategy
+
+This repository follows a standardized branching strategy consistent with other FormsFlow repositories.
+
+| Branch | Purpose |
+|---|---|
+| `formsflow-main` | Default branch. Acts as the main/master branch and contains the stable codebase. |
+| `formsflow-develop` | Development branch. Used for ongoing development and integration of new changes. |
+
+### Pull Request Guidelines
+
+- All new Pull Requests (PRs) must be created against `formsflow-develop`.
+- Do not raise new PRs directly against `formsflow-main` unless explicitly required.
+- Existing PRs targeting the previous branch will be automatically updated to reflect the new branch structure.
+
+**Note:** Always ensure that `formsflow-develop` is selected as the target branch when creating new PRs.
+
+
+## Redash features:
 
 1. **Browser-based**: Everything in your browser, with a shareable URL.
 2. **Ease-of-use**: Become immediately productive with data without the need to master complex software.
