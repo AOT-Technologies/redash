@@ -17,7 +17,7 @@ env:
   DEPLOYMENTS: >-
     forms-flow-analytics-server
     forms-flow-analytics-scheduler
-    forms-flow-analytics-worker
+    forms-flow-analytics-generic-worker
     forms-flow-analytics-adhoc-worker
     forms-flow-analytics-scheduled-worker
 
