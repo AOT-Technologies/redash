@@ -15,7 +15,7 @@ env:
   # Every Kubernetes deployment that runs the analytics image.
   # Each deployment has a container with the same name.
   DEPLOYMENTS: >-
-    forms-flow-analytics
+    forms-flow-analytics-server
     forms-flow-analytics-scheduler
     forms-flow-analytics-worker
     forms-flow-analytics-adhoc-worker
