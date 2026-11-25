@@ -3,7 +3,7 @@ name: CD - formsflow-analytics
 on:
   workflow_dispatch:
   push:
-    branches: [ formsflow-main, formsflow-develop ]
+    branches: [ formsflow-main, formsflow-develop, release/* ]
 
 defaults:
   run:
