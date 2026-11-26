@@ -1,6 +1,6 @@
 # Change Log
 
-## formsflow-analytics v8.4.0-rc - <Unreleased>
+## formsflow-analytics v8.4.0 - <Unreleased>
 
 From this release, the formsflow fork of Redash uses formsflow.ai version numbers, so the version moves from 24.04.0 to 8.4.0. This release is based on upstream Redash v26.9.0. The releases after this one in the file are upstream Redash releases.
 
@@ -21,7 +21,7 @@ From this release, the formsflow fork of Redash uses formsflow.ai version number
 - Docker images for `linux/arm64`. Both architectures are built on native GitHub runners and published as one multi-arch image, signed with cosign. CI also builds both architectures for every pull request.
 
 ### Changed
-- Version is `8.4.0-rc` (`VERSION`, `package.json`, `pyproject.toml`, `redash.__version__`).
+- Version is `8.4.0` (`VERSION`, `package.json`, `pyproject.toml`, `redash.__version__`).
 - `REDASH_VERSION_CHECK` defaults to `false`, because the check compares against upstream Redash releases.
 - Python 3.13 with uv, and Node.js 24 with pnpm, as in upstream Redash. Poetry, Yarn and their lock files are removed.
 - The `debug` command's remote debugger uses debugpy instead of ptvsd. It still listens on port 5678, and the server now waits for a debugger to attach before it starts.
