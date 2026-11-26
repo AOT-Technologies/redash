@@ -1,6 +1,6 @@
 [project]
 name = "redash"
-version = "8.4.0-rc"
+version = "8.4.0"
 description = "Make Your Company Data Driven. Connect to any data source, easily visualize, dashboard and share your data."
 authors = [
     { name = "Arik Fraimovich", email = "<arik@redash.io>" }
