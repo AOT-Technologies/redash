@@ -18,7 +18,9 @@ From this release, the formsflow fork of Redash uses formsflow.ai version number
 - SAML: the user's name is also read from `givenName`/`sn` and from the X.500 OIDs that Keycloak's mappers send (`urn:oid:2.5.4.42`, `urn:oid:2.5.4.4`). If the response has no name attributes, the email is used as the name.
 - `VERSION` file, used to tag Docker images.
 - `.gitattributes` rules that keep LF line endings in `bin/`, `.ci/`, `manage.py`, `*.sh` and the `Dockerfile`, so images built from Windows checkouts start.
+- `SQLPARSE_MAX_GROUPING_TOKENS` (default 10000) and `SQLPARSE_MAX_GROUPING_DEPTH` (default 100) settings: the sqlparse grouping limits. Raise them to keep the automatic limit and query formatting on very large queries, or set one to `0` to remove that limit. Higher limits let one large query use a worker for longer.
 - Docker images for `linux/arm64`. Both architectures are built on native GitHub runners and published as one multi-arch image, signed with cosign. CI also builds both architectures for every pull request.
+- The image is also published as `formsflow/redash-ee`. It has the same digest as `formsflow/redash`, and both are signed.
 
 ### Changed
 - Version is `8.4.0-alpha` (`VERSION`, `package.json`, `pyproject.toml`, `redash.__version__`).
@@ -28,6 +30,8 @@ From this release, the formsflow fork of Redash uses formsflow.ai version number
 - `REDASH_FEATURE_ALLOW_CUSTOM_JS_VISUALIZATIONS` defaults to `false` (from upstream). Set it to `true` to keep running Custom (JavaScript) charts.
 - With `REDASH_MULTI_ORG` enabled, links in emails and alerts are `<REDASH_HOST>/<org slug>`, and Redash no longer adds `https://`. Set `REDASH_HOST` to a URL that includes the scheme, for example `https://analytics.example.com`.
 - Dashboards use a 12-column grid (from upstream). A migration doubles the column and width of every existing widget. Scripts that create widgets with explicit positions must use 12-column values.
+- Branches are renamed: `formsflow-main` holds the stable code and `formsflow-develop` is the development branch. Open pull requests against `formsflow-develop` (see the README).
+- CD: a push to `formsflow-main`, `formsflow-develop` or `release/*` builds and publishes the images. It then verifies their signatures and deploys them to the DEV and QA EKS clusters. Build and deployment results are posted to Google Chat. Pull requests are reviewed automatically by PR-Agent.
 
 ### Upgrading
 - Back up the metadata database before the upgrade. The first start runs three migrations: `9e8c841d1a30` (recomputes query hashes), `1655999df5e3` (alert selector) and `db0aca1ebd32` (12-column dashboard layout).
@@ -38,7 +42,7 @@ From this release, the formsflow fork of Redash uses formsflow.ai version number
 ### Fixed
 - Fix: SAML login failed with a server error when the identity provider didn't send `FirstName` and `LastName` attributes.
 - Fix: `GET /api/dashboards/public/<token>` returned a server error instead of 404 for an invalid or expired dynamic key.
-- Fix: in upstream v26.9.0, `GET /api/queries` returned a server error for API-key users, including dynamic dashboard keys, because the favorites lookup used the key as a user ID.
+- Fix: `GET /api/queries` and `GET /api/dashboards` returned a server error for API-key users, including dynamic dashboard keys, because the favorites lookup used the key as a user ID.
 - Fix: in upstream v26.9.0, the `9e8c841d1a30` migration failed when a data source type had no registered query runner, for example Qubole. Those queries now get the default hash.
 - Fix: the 12-column layout migration failed on widgets without a position (from upstream master).
 
