@@ -30,8 +30,6 @@ From this release, the formsflow fork of Redash uses formsflow.ai version number
 - `REDASH_FEATURE_ALLOW_CUSTOM_JS_VISUALIZATIONS` defaults to `false` (from upstream). Set it to `true` to keep running Custom (JavaScript) charts.
 - With `REDASH_MULTI_ORG` enabled, links in emails and alerts are `<REDASH_HOST>/<org slug>`, and Redash no longer adds `https://`. Set `REDASH_HOST` to a URL that includes the scheme, for example `https://analytics.example.com`.
 - Dashboards use a 12-column grid (from upstream). A migration doubles the column and width of every existing widget. Scripts that create widgets with explicit positions must use 12-column values.
-- Branches are renamed: `formsflow-main` holds the stable code and `formsflow-develop` is the development branch. Open pull requests against `formsflow-develop` (see the README).
-- CD: a push to `formsflow-main`, `formsflow-develop` or `release/*` builds and publishes the images. It then verifies their signatures and deploys them to the DEV and QA EKS clusters. Build and deployment results are posted to Google Chat. Pull requests are reviewed automatically by PR-Agent.
 
 ### Upgrading
 - Back up the metadata database before the upgrade. The first start runs three migrations: `9e8c841d1a30` (recomputes query hashes), `1655999df5e3` (alert selector) and `db0aca1ebd32` (12-column dashboard layout).
