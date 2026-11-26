@@ -1,6 +1,6 @@
 # Change Log
 
-## formsflow-analytics v8.4.0 - <Unreleased>
+## formsflow-analytics v8.4.0 - 26-11-2026
 
 From this release, the formsflow fork of Redash uses formsflow.ai version numbers, so the version moves from 24.04.0 to 8.4.0. This release is based on upstream Redash v26.9.0. The releases after this one in the file are upstream Redash releases.
 
